@@ -1,12 +1,31 @@
 export interface Student {
   id: string;
-  email: string;
   name: string;
+  email: string;
   section: string;
   strand: string;
   grade: string;
-  balances: Balance[];
-  createdAt: Date;
+  status: 'active' | 'inactive';
+  studentId: string;
+  contactNumber: string;
+  guardianName: string;
+  guardianContact: string;
+  address: string;
+  enrollmentDate: Date;
+  balances?: {
+    id: string;
+    amount: number;
+    dueDate: Date;
+    status: 'pending' | 'paid';
+    type: string;
+  }[];
+  payments?: {
+    id: string;
+    amount: number;
+    date: Date;
+    method: string;
+    reference: string;
+  }[];
 }
 
 export interface Balance {

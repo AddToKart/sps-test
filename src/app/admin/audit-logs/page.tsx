@@ -1,3 +1,5 @@
+'use client';
+
 import React, { useState } from 'react';
 
 interface AuditLog {
@@ -8,13 +10,13 @@ interface AuditLog {
   details: any;
 }
 
-export default function AuditLogs() {
+export default function AuditLogsPage() {
   const [logs, setLogs] = useState<AuditLog[]>([]);
   
   return (
-    <div className="p-6">
-      <h2 className="text-2xl font-bold mb-4">Audit Logs</h2>
-      {/* Add table for audit logs */}
+    <div>
+      <h1 className="text-2xl font-bold mb-6">Audit Logs</h1>
+      {/* Audit logs content */}
     </div>
   );
 } 

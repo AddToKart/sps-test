@@ -8,17 +8,20 @@ const geist = Geist({
 });
 
 export const metadata: Metadata = {
-  title: "My App",
-  description: "My application description",
+  title: 'E-Paycons - School Payment Management System',
+  description: 'Streamline your school payment collections with E-Paycons',
 };
 
 export default function RootLayout({
   children,
-}: Readonly<{
+}: {
   children: React.ReactNode;
-}>) {
+}) {
   return (
     <html lang="en">
+      <head>
+        <link rel="icon" href="/favicon.ico" />
+      </head>
       <body className={`${geist.className} antialiased`}>
         <AuthProvider>{children}</AuthProvider>
       </body>
