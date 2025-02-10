@@ -33,7 +33,30 @@ export default function Login() {
     try {
       const userCredential = await signInWithEmailAndPassword(auth, email, password);
       if (userCredential.user) {
-        router.push(userType === 'admin' ? '/admin/dashboard' : '/student/dashboard');
+        router.push(userType === 'admin' ? '/admin' : '/student/dashboard');
+      }
+    } catch (error: any) {
+      setError(error.message);
+    }
+  };
+
+  // Quick access login handlers
+  const handleQuickAdminLogin = async () => {
+    try {
+      const userCredential = await signInWithEmailAndPassword(auth, "kurt@admin.com", "kurt123");
+      if (userCredential.user) {
+        router.push('/admin');
+      }
+    } catch (error: any) {
+      setError(error.message);
+    }
+  };
+
+  const handleQuickStudentLogin = async () => {
+    try {
+      const userCredential = await signInWithEmailAndPassword(auth, "kate@student.com", "kate123");
+      if (userCredential.user) {
+        router.push('/student/dashboard');
       }
     } catch (error: any) {
       setError(error.message);
@@ -95,6 +118,25 @@ export default function Login() {
             </button>
           </div>
         </form>
+
+        {/* Quick Access Buttons */}
+        <div className="mt-4 space-y-2">
+          <p className="text-center text-sm text-gray-600">Quick Access (Temporary)</p>
+          <div className="flex space-x-4">
+            <button
+              onClick={handleQuickAdminLogin}
+              className="flex-1 py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500"
+            >
+              Admin Login
+            </button>
+            <button
+              onClick={handleQuickStudentLogin}
+              className="flex-1 py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+            >
+              Student Login
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   );
