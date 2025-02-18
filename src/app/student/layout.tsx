@@ -3,29 +3,70 @@
 import { useAuth } from '@/contexts/AuthContext';
 import { useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { auth } from '@/lib/firebase/config';
 import { signOut } from 'firebase/auth';
+import PageTransition from '@/components/animations/PageTransition';
+import { motion } from 'framer-motion';
+import { collection, query, where, onSnapshot } from 'firebase/firestore';
+import { db } from '@/lib/firebase/config';
+import { BellIcon } from '@heroicons/react/24/outline';
+import NotificationsInbox from '@/components/student/NotificationsInbox';
 
 export default function StudentLayout({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [showNotifications, setShowNotifications] = useState(false);
 
   useEffect(() => {
-    if (!user || !user.email?.endsWith('@student.com')) {
+    if (!user) {
       router.push('/login');
+      return;
     }
+
+    if (!user.email?.endsWith('@icons.com')) {
+      router.push('/login');
+      return;
+    }
+
+    // Listen for unread notifications using student's email
+    const notificationsQuery = query(
+      collection(db, 'notifications'),
+      where('studentEmail', '==', user.email),
+      where('status', '==', 'unread')
+    );
+
+    const unsubscribe = onSnapshot(notificationsQuery, (snapshot) => {
+      // Only update if user is still logged in
+      if (user) {
+        setUnreadCount(snapshot.docs.length);
+      }
+    });
+
+    return () => {
+      // Cleanup listener on unmount or when user logs out
+      unsubscribe();
+      setUnreadCount(0);
+      setShowNotifications(false);
+    };
   }, [user, router]);
 
   const handleLogout = async () => {
     try {
+      setShowNotifications(false); // Hide notifications before logout
       await signOut(auth);
       router.push('/login');
     } catch (error) {
       console.error('Error signing out:', error);
     }
   };
+
+  // Don't render anything while checking auth
+  if (!user) {
+    return null;
+  }
 
   const navigation = [
     {
@@ -75,7 +116,7 @@ export default function StudentLayout({ children }: { children: React.ReactNode 
   };
 
   return (
-    <div className="min-h-screen bg-gray-100">
+    <div className="flex h-screen bg-gray-100">
       {/* Sidebar */}
       <div className="fixed inset-y-0 left-0 w-64 bg-[#002147] text-white">
         <div className="flex flex-col h-full">
@@ -126,10 +167,40 @@ export default function StudentLayout({ children }: { children: React.ReactNode 
         </div>
       </div>
 
-      {/* Main Content */}
-      <div className="pl-64">
+      {/* Main content */}
+      <div className="flex-1 pl-64">
+        {/* Header with notifications */}
+        <div className="bg-white shadow-sm p-4 flex justify-between items-center">
+          <h2 className="text-xl font-semibold text-gray-800">Student Dashboard</h2>
+          <div className="relative">
+            <button
+              onClick={() => setShowNotifications(!showNotifications)}
+              className="p-2 hover:bg-gray-100 rounded-full relative"
+            >
+              <BellIcon className="h-6 w-6 text-gray-600" />
+              {unreadCount > 0 && (
+                <span className="absolute top-0 right-0 bg-red-500 text-white text-xs rounded-full h-5 w-5 flex items-center justify-center">
+                  {unreadCount}
+                </span>
+              )}
+            </button>
+
+            {/* Notifications dropdown */}
+            {showNotifications && user?.email && (
+              <div className="absolute right-0 mt-2 w-96 bg-white rounded-lg shadow-lg z-50">
+                <div className="max-h-[80vh] overflow-y-auto">
+                  <NotificationsInbox studentId={user.email} />
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Main content area */}
         <main className="p-8">
-          {children}
+          <PageTransition>
+            {children}
+          </PageTransition>
         </main>
       </div>
     </div>

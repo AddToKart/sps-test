@@ -19,6 +19,8 @@ import {
   Legend,
   ArcElement,
 } from 'chart.js';
+import { motion } from 'framer-motion';
+import { FadeIn } from '@/components/animations/FadeIn';
 
 ChartJS.register(
   CategoryScale,
@@ -30,6 +32,49 @@ ChartJS.register(
   Legend,
   ArcElement
 );
+
+const cardVariants = {
+  hover: {
+    scale: 1.02,
+    transition: {
+      duration: 0.2
+    }
+  }
+};
+
+// Define report types
+const reportTypes = [
+  {
+    title: "Collection Summary",
+    description: "Generate collection summary report",
+    onClick: () => generateReport('collection'),
+    icon: (
+      <svg className="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+      </svg>
+    )
+  },
+  {
+    title: "Student Report",
+    description: "Generate student payment status report",
+    onClick: () => generateReport('student'),
+    icon: (
+      <svg className="w-6 h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
+      </svg>
+    )
+  },
+  {
+    title: "Payment Analysis",
+    description: "Generate payment method analysis report",
+    onClick: () => generateReport('payment'),
+    icon: (
+      <svg className="w-6 h-6 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+      </svg>
+    )
+  }
+];
 
 export default function Reports() {
   const { user } = useAuth();
@@ -118,38 +163,11 @@ export default function Reports() {
   const generateReport = async (type: string) => {
     setGenerating(true);
     try {
-      const studentsRef = collection(db, 'students');
-      const studentsSnapshot = await getDocs(studentsRef);
-      
-      let reportData = [];
-      
-      for (const studentDoc of studentsSnapshot.docs) {
-        const student = studentDoc.data();
-        const balancesRef = collection(db, `students/${studentDoc.id}/balances`);
-        const balancesSnapshot = await getDocs(balancesRef);
-        
-        switch (type) {
-          case 'collection':
-            // Collection report logic
-            break;
-          case 'student':
-            // Student report logic
-            break;
-          case 'payment':
-            // Payment report logic
-            break;
-        }
-      }
-
-      // Export to Excel
-      const ws = XLSX.utils.json_to_sheet(reportData);
-      const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, 'Report');
-      XLSX.writeFile(wb, `report_${type}_${new Date().toISOString().split('T')[0]}.xlsx`);
-
+      // Add your report generation logic here
+      await new Promise(resolve => setTimeout(resolve, 2000)); // Simulated delay
+      // You can implement the actual report generation logic based on the type
     } catch (error) {
       console.error('Error generating report:', error);
-      alert('Error generating report');
     } finally {
       setGenerating(false);
     }
@@ -165,70 +183,73 @@ export default function Reports() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-bold mb-6">Reports</h1>
+      <motion.h1 
+        className="text-2xl font-bold"
+        initial={{ opacity: 0, y: -20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.5 }}
+      >
+        Reports
+      </motion.h1>
 
       {/* Payment Statistics */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        {/* Total Collections */}
-        <div className="bg-white p-6 rounded-lg shadow">
-          <div className="flex items-center">
-            <div className="p-3 bg-green-100 rounded-full">
-              <svg className="h-6 w-6 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3-.895 3-2-1.343-2-3-2z" />
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 2C6.477 2 2 6.477 2 12s4.477 10 10 10 10-4.477 10-10S17.523 2 12 2z" />
-              </svg>
+        {/* Map through stats with FadeIn */}
+        {Object.entries(stats).map(([key, value], index) => (
+          <FadeIn key={key} delay={index * 0.1}>
+            <div className="bg-white p-6 rounded-lg shadow">
+              <div className="flex items-center">
+                <div className="p-3 bg-green-100 rounded-full">
+                  <svg className="h-6 w-6 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3-.895 3-2-1.343-2-3-2z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 2C6.477 2 2 6.477 2 12s4.477 10 10 10 10-4.477 10-10S17.523 2 12 2z" />
+                  </svg>
+                </div>
+                <div className="ml-4">
+                  <p className="text-sm font-medium text-gray-500">Total Collections</p>
+                  <p className="text-2xl font-bold text-[#002147]">₱{value.toLocaleString()}</p>
+                </div>
+              </div>
             </div>
-            <div className="ml-4">
-              <p className="text-sm font-medium text-gray-500">Total Collections</p>
-              <p className="text-2xl font-bold text-[#002147]">₱{stats.totalCollections.toLocaleString()}</p>
-            </div>
-          </div>
-        </div>
+          </FadeIn>
+        ))}
+      </div>
 
-        {/* Completed Payments */}
-        <div className="bg-white p-6 rounded-lg shadow">
-          <div className="flex items-center">
-            <div className="p-3 bg-blue-100 rounded-full">
-              <svg className="h-6 w-6 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-            </div>
-            <div className="ml-4">
-              <p className="text-sm font-medium text-gray-500">Completed Payments</p>
-              <p className="text-2xl font-bold text-[#002147]">{stats.completedPayments}</p>
-            </div>
-          </div>
-        </div>
+      {/* Charts and Info Grid */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <motion.div 
+          className="bg-white p-6 rounded-lg shadow md:col-span-2"
+          initial={{ opacity: 0, x: -20 }}
+          animate={{ opacity: 1, x: 0 }}
+          transition={{ duration: 0.5, delay: 0.2 }}
+        >
+          {/* Payment Trends Chart */}
+        </motion.div>
 
-        {/* Pending Payments */}
-        <div className="bg-white p-6 rounded-lg shadow">
-          <div className="flex items-center">
-            <div className="p-3 bg-yellow-100 rounded-full">
-              <svg className="h-6 w-6 text-yellow-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-            </div>
-            <div className="ml-4">
-              <p className="text-sm font-medium text-gray-500">Pending Payments</p>
-              <p className="text-2xl font-bold text-[#002147]">{stats.pendingPayments}</p>
-            </div>
-          </div>
-        </div>
+        <motion.div 
+          className="bg-white p-6 rounded-lg shadow"
+          initial={{ opacity: 0, x: 20 }}
+          animate={{ opacity: 1, x: 0 }}
+          transition={{ duration: 0.5, delay: 0.3 }}
+        >
+          {/* Payment Methods Chart */}
+        </motion.div>
+      </div>
 
-        {/* Success Rate */}
-        <div className="bg-white p-6 rounded-lg shadow">
-          <div className="flex items-center">
-            <div className="p-3 bg-purple-100 rounded-full">
-              <svg className="h-6 w-6 text-purple-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
-              </svg>
-            </div>
-            <div className="ml-4">
-              <p className="text-sm font-medium text-gray-500">Success Rate</p>
-              <p className="text-2xl font-bold text-[#002147]">{stats.successRate.toFixed(1)}%</p>
-            </div>
-          </div>
-        </div>
+      {/* Report Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        {reportTypes.map((report, index) => (
+          <motion.div
+            key={report.title}
+            variants={cardVariants}
+            whileHover="hover"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.5, delay: index * 0.1 }}
+          >
+            <ReportCard {...report} />
+          </motion.div>
+        ))}
       </div>
 
       {/* Search and Filters */}
@@ -278,27 +299,6 @@ export default function Reports() {
             {/* Add report rows here */}
           </tbody>
         </table>
-      </div>
-
-      {/* Rest of your reports page content */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <ReportCard
-          title="Collection Summary"
-          description="Generate collection summary report"
-          onClick={() => generateReport('collection')}
-        />
-        
-        <ReportCard
-          title="Student Report"
-          description="Generate student payment status report"
-          onClick={() => generateReport('student')}
-        />
-        
-        <ReportCard
-          title="Payment Analysis"
-          description="Generate payment method analysis report"
-          onClick={() => generateReport('payment')}
-        />
       </div>
 
       {generating && (

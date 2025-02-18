@@ -5,6 +5,63 @@ import { useRouter } from 'next/navigation';
 import { usePathname } from 'next/navigation';
 import Link from 'next/link';
 import { useState } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+
+const navItemVariants = {
+  hover: {
+    scale: 1.05,
+    transition: {
+      duration: 0.2,
+      ease: "easeInOut"
+    }
+  }
+};
+
+const logoVariants = {
+  initial: { opacity: 0, x: -20 },
+  animate: { 
+    opacity: 1, 
+    x: 0,
+    transition: {
+      duration: 0.5
+    }
+  }
+};
+
+const navContainerVariants = {
+  initial: { opacity: 0, y: -10 },
+  animate: { 
+    opacity: 1, 
+    y: 0,
+    transition: {
+      duration: 0.5,
+      staggerChildren: 0.1
+    }
+  }
+};
+
+const NavHighlight = ({ pathname }: { pathname: string }) => {
+  const activeIndex = navigation.findIndex(item => item.href === pathname);
+  
+  return (
+    <motion.div
+      className="absolute h-8 rounded-md bg-[#4FB3E8] z-0"
+      initial={false}
+      animate={{
+        x: `calc(${activeIndex * 100}% + ${activeIndex * 0.25}rem)`,
+        width: '100%',
+      }}
+      transition={{
+        type: "spring",
+        stiffness: 400,
+        damping: 30
+      }}
+      style={{
+        width: 'calc(100% / 6)',
+      }}
+    />
+  );
+};
 
 export default function AdminNavbar() {
   const { user } = useAuth();
@@ -71,38 +128,53 @@ export default function AdminNavbar() {
 
   return (
     <nav className="bg-[#002147] text-white">
-      {/* Desktop Navigation */}
       <div className="max-w-7xl mx-auto px-4">
         <div className="flex items-center justify-between h-16">
-          {/* Logo and Brand */}
-          <div className="flex items-center">
+          <motion.div 
+            className="flex items-center"
+            variants={logoVariants}
+            initial="initial"
+            animate="animate"
+          >
             <img src="/logo.png" alt="E-Paycons Logo" className="h-8 w-8" />
             <span className="ml-2 text-lg font-semibold hidden md:block">
               E-Paycons
               <span className="text-xs ml-2 text-gray-300">Admin Portal</span>
             </span>
-          </div>
+          </motion.div>
 
-          {/* Desktop Menu */}
-          <div className="hidden md:flex items-center space-x-1">
+          <motion.div 
+            className="hidden md:flex items-center space-x-1 relative"
+            variants={navContainerVariants}
+            initial="initial"
+            animate="animate"
+          >
+            <NavHighlight pathname={pathname} />
+            
             {navigation.map((item) => (
-              <Link
+              <motion.div
                 key={item.name}
-                href={item.href}
-                className={`
-                  px-3 py-2 rounded-md text-sm flex items-center space-x-2
-                  ${pathname === item.href 
-                    ? 'bg-[#4FB3E8] text-white' 
-                    : 'text-gray-300 hover:bg-[#4FB3E8]/80 hover:text-white'}
-                `}
+                variants={navItemVariants}
+                whileHover="hover"
+                className="relative z-10"
               >
-                {item.icon}
-                <span>{item.name}</span>
-              </Link>
+                <Link
+                  href={item.href}
+                  className={`
+                    px-3 py-2 rounded-md text-sm flex items-center space-x-2
+                    ${pathname === item.href 
+                      ? 'text-white' 
+                      : 'text-gray-300 hover:text-white'}
+                    relative z-10 transition-colors duration-200
+                  `}
+                >
+                  {item.icon}
+                  <span>{item.name}</span>
+                </Link>
+              </motion.div>
             ))}
-          </div>
+          </motion.div>
 
-          {/* User Info and Sign Out */}
           <div className="flex items-center">
             <div className="hidden md:block mr-4">
               <div className="text-right">
@@ -117,7 +189,6 @@ export default function AdminNavbar() {
               Logout
             </button>
 
-            {/* Mobile menu button */}
             <button
               onClick={() => setIsDropdownOpen(!isDropdownOpen)}
               className="md:hidden ml-4 p-2 rounded-md hover:bg-[#4FB3E8]/80 focus:outline-none"
@@ -132,32 +203,45 @@ export default function AdminNavbar() {
         </div>
       </div>
 
-      {/* Mobile Navigation Dropdown */}
-      {isDropdownOpen && (
-        <div className="md:hidden bg-[#002147] border-t border-[#4FB3E8]/20">
-          <div className="px-2 pt-2 pb-3 space-y-1">
-            {navigation.map((item) => (
-              <Link
-                key={item.name}
-                href={item.href}
-                onClick={() => setIsDropdownOpen(false)}
-                className={`
-                  block px-3 py-2 rounded-md text-base font-medium flex items-center space-x-3
-                  ${pathname === item.href 
-                    ? 'bg-[#4FB3E8] text-white' 
-                    : 'text-gray-300 hover:bg-[#4FB3E8]/80 hover:text-white'}
-                `}
-              >
-                {item.icon}
-                <span>{item.name}</span>
-              </Link>
-            ))}
-            <div className="px-3 py-2 text-sm text-gray-400">
-              Signed in as: {user?.email}
+      <AnimatePresence>
+        {isDropdownOpen && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }}
+            transition={{ duration: 0.2 }}
+            className="md:hidden bg-[#002147] border-t border-[#4FB3E8]/20 overflow-hidden"
+          >
+            <div className="px-2 pt-2 pb-3 space-y-1">
+              {navigation.map((item) => (
+                <motion.div
+                  key={item.name}
+                  initial={{ x: -20, opacity: 0 }}
+                  animate={{ x: 0, opacity: 1 }}
+                  transition={{ duration: 0.2 }}
+                >
+                  <Link
+                    href={item.href}
+                    onClick={() => setIsDropdownOpen(false)}
+                    className={`
+                      block px-3 py-2 rounded-md text-base font-medium flex items-center space-x-3
+                      ${pathname === item.href 
+                        ? 'bg-[#4FB3E8] text-white' 
+                        : 'text-gray-300 hover:bg-[#4FB3E8]/80 hover:text-white'}
+                    `}
+                  >
+                    {item.icon}
+                    <span>{item.name}</span>
+                  </Link>
+                </motion.div>
+              ))}
+              <div className="px-3 py-2 text-sm text-gray-400">
+                Signed in as: {user?.email}
+              </div>
             </div>
-          </div>
-        </div>
-      )}
+          </motion.div>
+        )}
+      </AnimatePresence>
     </nav>
   );
 } 

@@ -1,7 +1,12 @@
 import { NextResponse } from 'next/server';
+import { checkRateLimit } from '@/utils/rateLimit';
+import { handleError } from '@/utils/error';
+import { FirebaseService } from '@/services/firebase';
+import type { NextRequest } from 'next/server';
 import admin from 'firebase-admin';
 import { getAuth } from 'firebase-admin/auth';
 import { getFirestore } from 'firebase-admin/firestore';
+import { adminAuth, adminDb } from '@/lib/firebase/admin';
 
 // Initialize Firebase Admin if not already initialized
 if (!admin.apps.length) {
@@ -14,14 +19,23 @@ if (!admin.apps.length) {
   });
 }
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
+    if (!checkRateLimit(req)) {
+      return NextResponse.json(
+        { error: 'Too many requests' },
+        { status: 429 }
+      );
+    }
+
     const auth = getAuth();
     const db = getFirestore();
     const { users } = await auth.listUsers();
     
     // Get all student users from Auth
-    const studentUsers = users.filter(user => user.email?.endsWith('@student.com'));
+    const studentUsers = users.filter(user => 
+      user.email?.endsWith('@icons.com')
+    );
 
     // Get existing students from Firestore
     const studentsSnapshot = await db.collection('students').get();
@@ -81,8 +95,75 @@ export async function GET() {
     }));
 
     return NextResponse.json({ students });
+  } catch (error) {
+    const appError = handleError(error);
+    return NextResponse.json(
+      { error: appError.message },
+      { status: appError.statusCode }
+    );
+  }
+}
+
+export async function POST(request: Request) {
+  try {
+    const data = await request.json();
+    
+    if (!adminAuth || !adminDb) {
+      throw new Error('Firebase Admin not initialized properly');
+    }
+
+    console.log('Creating user with email:', data.email);
+
+    // Create user with admin SDK
+    const userRecord = await adminAuth.createUser({
+      email: data.email,
+      password: data.password,
+      displayName: data.fullName,
+    });
+
+    console.log('User created:', userRecord.uid);
+
+    // Prepare the student document data
+    const studentData = {
+      fullName: data.fullName,
+      email: data.email,
+      studentId: data.studentId,
+      grade: data.grade,
+      strand: data.strand,
+      section: data.section,
+      balance: 0,
+      createdAt: new Date().toISOString(),
+      uid: userRecord.uid
+    };
+
+    // Only add guardianInfo if it exists in the request
+    if (data.guardianInfo) {
+      studentData.guardianInfo = {
+        name: data.guardianInfo.name || '',
+        phone: data.guardianInfo.phone || '',
+        email: data.guardianInfo.email || ''
+      };
+    }
+
+    // Create student document
+    await adminDb.collection('students').doc(data.studentId).set(studentData);
+
+    console.log('Student document created');
+
+    return NextResponse.json({ 
+      success: true, 
+      studentId: data.studentId,
+      uid: userRecord.uid 
+    });
   } catch (error: any) {
-    console.error('Error fetching users:', error);
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    console.error('Error in POST /api/students:', error);
+    return NextResponse.json(
+      { 
+        error: error.message,
+        code: error.code,
+        stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+      }, 
+      { status: 500 }
+    );
   }
 } 

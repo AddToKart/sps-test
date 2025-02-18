@@ -8,10 +8,12 @@ import PaymentFilters from '@/components/admin/payments/PaymentFilters';
 import PaymentTable from '@/components/admin/payments/PaymentTable';
 import PaymentExport from '@/components/admin/payments/PaymentExport';
 import AddFeeModal from '@/components/admin/payments/AddFeeModal';
-import BulkFeeModal from '@/components/admin/payments/BulkFeeModal';
+import BulkFeesModal from '@/components/admin/payments/BulkFeesModal';
 import OverdueSettingsModal from '@/components/admin/payments/OverdueSettingsModal';
 import AutomationSettingsModal from '@/components/admin/payments/AutomationSettingsModal';
 import MigrateDataButton from '@/components/admin/MigrateDataButton';
+import Toast from '@/components/ui/Toast';
+import toast from 'react-hot-toast';
 
 interface Payment {
   id: string;
@@ -39,9 +41,10 @@ export default function PaymentManagement() {
   });
   const [methodFilter, setMethodFilter] = useState('all');
   const [isAddFeeModalOpen, setIsAddFeeModalOpen] = useState(false);
-  const [isBulkFeeModalOpen, setIsBulkFeeModalOpen] = useState(false);
+  const [showBulkFeesModal, setShowBulkFeesModal] = useState(false);
   const [isOverdueModalOpen, setIsOverdueModalOpen] = useState(false);
   const [isAutomationModalOpen, setIsAutomationModalOpen] = useState(false);
+  const [toastMessage, setToastMessage] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [filters, setFilters] = useState({
     dateRange: 'all',
     startDate: null,
@@ -175,6 +178,55 @@ export default function PaymentManagement() {
     return Math.round(total / payments.length);
   };
 
+  const sendPaymentReminders = async () => {
+    try {
+      // Get all pending balances
+      const balancesQuery = query(
+        collection(db, 'balances'),
+        where('status', '==', 'pending')
+      );
+      const balancesSnapshot = await getDocs(balancesQuery);
+      
+      let reminderCount = 0;
+      
+      for (const balanceDoc of balancesSnapshot.docs) {
+        const balance = balanceDoc.data();
+        const dueDate = balance.dueDate.toDate();
+        const today = new Date();
+        const daysUntilDue = Math.ceil((dueDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+
+        // Send reminder if due date is within 7 days or overdue
+        if (daysUntilDue <= 7 || daysUntilDue < 0) {
+          // Create notification
+          await addDoc(collection(db, 'notifications'), {
+            studentId: balance.studentId,
+            studentEmail: balance.studentEmail,
+            title: daysUntilDue < 0 ? 'Payment Overdue' : 'Payment Reminder',
+            message: daysUntilDue < 0 
+              ? `Your payment of ₱${balance.amount} for ${balance.type} is overdue.`
+              : `Your payment of ₱${balance.amount} for ${balance.type} is due in ${daysUntilDue} days.`,
+            type: daysUntilDue < 0 ? 'overdue_reminder' : 'payment_reminder',
+            status: 'unread',
+            createdAt: Timestamp.now(),
+            relatedBalanceId: balanceDoc.id,
+            dueDate: balance.dueDate,
+            amount: balance.amount
+          });
+          reminderCount++;
+        }
+      }
+
+      if (reminderCount > 0) {
+        toast.success(`Sent ${reminderCount} payment reminders`);
+      } else {
+        toast.success('No payments due soon or overdue');
+      }
+    } catch (error) {
+      console.error('Error sending reminders:', error);
+      toast.error('Failed to send payment reminders');
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex justify-center items-center min-h-[400px]">
@@ -195,12 +247,18 @@ export default function PaymentManagement() {
             Add Fee
           </button>
           <button
-            onClick={() => setIsBulkFeeModalOpen(true)}
+            onClick={() => setShowBulkFeesModal(true)}
             className="px-4 py-2 bg-[#002147] text-white rounded-md hover:bg-[#002147]/90"
           >
             Bulk Add Fees
           </button>
           <MigrateDataButton />
+          <button
+            onClick={sendPaymentReminders}
+            className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
+          >
+            Send Payment Reminders
+          </button>
         </div>
       </div>
 
@@ -236,7 +294,10 @@ export default function PaymentManagement() {
         <div className="bg-white p-6 rounded-lg shadow hover:shadow-md transition-shadow">
           <h3 className="text-lg font-semibold mb-4">Quick Actions</h3>
           <div className="space-y-2">
-            <button className="w-full text-left text-[#4FB3E8] hover:text-[#4FB3E8]/90">
+            <button 
+              onClick={sendPaymentReminders}
+              className="w-full text-left text-[#4FB3E8] hover:text-[#4FB3E8]/90"
+            >
               Send Payment Reminders →
             </button>
             <button className="w-full text-left text-[#4FB3E8] hover:text-[#4FB3E8]/90">
@@ -256,9 +317,13 @@ export default function PaymentManagement() {
         isOpen={isAddFeeModalOpen}
         onClose={() => setIsAddFeeModalOpen(false)}
       />
-      <BulkFeeModal
-        isOpen={isBulkFeeModalOpen}
-        onClose={() => setIsBulkFeeModalOpen(false)}
+      <BulkFeesModal
+        isOpen={showBulkFeesModal}
+        onClose={() => setShowBulkFeesModal(false)}
+        onSuccess={() => {
+          setToastMessage({ message: 'Bulk fees added successfully!', type: 'success' });
+          setShowBulkFeesModal(false);
+        }}
       />
       <OverdueSettingsModal
         isOpen={isOverdueModalOpen}
@@ -268,6 +333,14 @@ export default function PaymentManagement() {
         isOpen={isAutomationModalOpen}
         onClose={() => setIsAutomationModalOpen(false)}
       />
+
+      {toastMessage && (
+        <Toast
+          message={toastMessage.message}
+          type={toastMessage.type}
+          onClose={() => setToastMessage(null)}
+        />
+      )}
     </div>
   );
 } 

@@ -4,7 +4,6 @@ import { useEffect, useState } from 'react';
 import { db } from '@/lib/firebase/config';
 import { collection, getDocs, query, where, orderBy, limit, Timestamp } from 'firebase/firestore';
 import { useAuth } from '@/contexts/AuthContext';
-import { useRouter } from 'next/navigation';
 import { Line, Doughnut } from 'react-chartjs-2';
 import {
   Chart as ChartJS,
@@ -17,6 +16,7 @@ import {
   Legend,
   ArcElement,
 } from 'chart.js';
+import BulkFeesModal from '@/components/admin/BulkFeesModal';
 
 // Register ChartJS components
 ChartJS.register(
@@ -29,6 +29,29 @@ ChartJS.register(
   Legend,
   ArcElement
 );
+
+interface Student {
+  id: string;
+  fullName: string;
+  email: string;
+  studentId: string;
+  grade: string;
+  strand: string;
+  section: string;
+}
+
+// Add these constants at the top of your file
+const GRADES = ['11', '12'];
+const STRANDS = ['ABM', 'HUMSS', 'ICT', 'STEM'];
+const SECTIONS = ['A', 'B', 'C', 'D'];
+const FEE_TYPES = [
+  'Tuition Fee',
+  'Laboratory Fee',
+  'Miscellaneous Fee',
+  'Books and Modules',
+  'School Events',
+  'Other Fees'
+];
 
 export default function AdminDashboard() {
   const { user } = useAuth();
@@ -44,7 +67,6 @@ export default function AdminDashboard() {
   });
 
   const [loading, setLoading] = useState(true);
-  const router = useRouter();
 
   // Add new state for charts
   const [paymentTrends, setPaymentTrends] = useState({
@@ -69,134 +91,172 @@ export default function AdminDashboard() {
   const [todayCollection, setTodayCollection] = useState(0);
   const [weeklyCollection, setWeeklyCollection] = useState(0);
   const [monthlyCollection, setMonthlyCollection] = useState(0);
+  const [students, setStudents] = useState<Student[]>([]);
+  const [isBulkFeesModalOpen, setIsBulkFeesModalOpen] = useState(false);
 
   useEffect(() => {
+    if (!user || !user.email?.endsWith('@admin.com')) {
+      window.location.href = '/login';
+      return;
+    }
+
     const fetchData = async () => {
       try {
-        // Fetch students and calculate stats
+        setLoading(true);
+        
+        // 1. Fetch students
         const studentsRef = collection(db, 'students');
         const studentsSnapshot = await getDocs(studentsRef);
+        const studentsData = studentsSnapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        }));
         
-        let totalStudents = studentsSnapshot.size;
-        let activeStudents = 0;
-        let withBalance = 0;
-        let totalCollections = 0;
-        let pendingPayments = 0;
-        let completedPayments = 0;
-        let today = 0;
-        let weekly = 0;
-        let monthly = 0;
-        let recent = [];
-        
-        const now = new Date();
-        const startOfDay = new Date(now.setHours(0, 0, 0, 0));
-        const startOfWeek = new Date(now.setDate(now.getDate() - now.getDay()));
-        const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-
-        // Get last 7 days for trends
-        const last7Days = [...Array(7)].map((_, i) => {
-          const date = new Date();
-          date.setDate(date.getDate() - i);
-          return date;
-        }).reverse();
-
-        const dailyTotals = Array(7).fill(0);
-        const methodCounts = {
-          gcash: 0,
-          maya: 0,
-          bdo: 0,
-          bpi: 0,
-          unionbank: 0
-        };
-
-        // Process each student
-        await Promise.all(studentsSnapshot.docs.map(async (doc) => {
-          const student = doc.data();
-          if (student.status === 'active') activeStudents++;
-
-          // Get student balances
-          const balancesRef = collection(db, `students/${doc.id}/balances`);
-          const balancesSnapshot = await getDocs(balancesRef);
-          
-          let hasUnpaidBalance = false;
-          balancesSnapshot.forEach(balanceDoc => {
-            const balance = balanceDoc.data();
-            if (balance.status === 'pending') {
-              hasUnpaidBalance = true;
-              pendingPayments++;
-            } else if (balance.status === 'paid') {
-              completedPayments++;
-              totalCollections += balance.amount || 0;
-
-              // Calculate collections by time period
-              const paymentDate = balance.paidAt?.toDate();
-              if (paymentDate >= startOfDay) {
-                today += balance.amount || 0;
-              }
-              if (paymentDate >= startOfWeek) {
-                weekly += balance.amount || 0;
-              }
-              if (paymentDate >= startOfMonth) {
-                monthly += balance.amount || 0;
-              }
-
-              // Add to recent payments
-              recent.push({
-                id: balanceDoc.id,
-                studentId: doc.id,
-                studentName: student.name,
-                amount: balance.amount,
-                createdAt: balance.paidAt,
-              });
-
-              // Update payment method counting
-              const method = balance.paymentMethod?.toLowerCase() || '';
-              if (method.includes('maya') || method.includes('paymaya')) {
-                methodCounts.maya++;
-              } else if (method.includes('gcash')) {
-                methodCounts.gcash++;
-              } else if (method.includes('bdo')) {
-                methodCounts.bdo++;
-              } else if (method.includes('bpi')) {
-                methodCounts.bpi++;
-              } else if (method.includes('unionbank')) {
-                methodCounts.unionbank++;
-              }
-
-              // Add to daily totals for trend chart
-              const paymentDay = paymentDate?.getDate();
-              const dayIndex = last7Days.findIndex(d => d.getDate() === paymentDay);
-              if (dayIndex !== -1) {
-                dailyTotals[dayIndex] += balance.amount || 0;
-              }
-            }
-          });
-
-          if (hasUnpaidBalance) withBalance++;
+        // 2. Fetch balances
+        const balancesRef = collection(db, 'balances');
+        const balancesSnapshot = await getDocs(balancesRef);
+        const balancesData = balancesSnapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data()
         }));
 
+        // Calculate stats
+        const totalStudents = studentsData.length;
+        const activeStudents = studentsData.filter(student => student.status !== 'inactive').length;
+        
+        // Calculate students with balance
+        const studentsWithBalance = new Set(
+          balancesData
+            .filter(balance => balance.status === 'pending')
+            .map(balance => balance.studentId)
+        ).size;
+
+        // Calculate payments and collections
+        const pendingPayments = balancesData.filter(balance => balance.status === 'pending').length;
+        const completedPayments = balancesData.filter(balance => balance.status === 'paid').length;
+        
+        const totalCollections = balancesData
+          .filter(balance => balance.status === 'paid')
+          .reduce((sum, balance) => sum + (balance.amount || 0), 0);
+
+        // Calculate collection rate
         const collectionRate = completedPayments > 0 
           ? (completedPayments / (pendingPayments + completedPayments)) * 100 
           : 0;
 
-        // Sort and limit recent payments
-        recent.sort((a, b) => b.createdAt.seconds - a.createdAt.seconds);
-        recent = recent.slice(0, 5);
+        // Calculate time-based collections
+        const now = new Date();
+        const startOfDay = new Date(now.setHours(0, 0, 0, 0));
+        const startOfWeek = new Date(now);
+        startOfWeek.setDate(now.getDate() - now.getDay());
+        const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+
+        const todayCollection = balancesData
+          .filter(balance => 
+            balance.status === 'paid' && 
+            balance.paidAt?.toDate() >= startOfDay
+          )
+          .reduce((sum, balance) => sum + (balance.amount || 0), 0);
+
+        const weeklyCollection = balancesData
+          .filter(balance => 
+            balance.status === 'paid' && 
+            balance.paidAt?.toDate() >= startOfWeek
+          )
+          .reduce((sum, balance) => sum + (balance.amount || 0), 0);
+
+        const monthlyCollection = balancesData
+          .filter(balance => 
+            balance.status === 'paid' && 
+            balance.paidAt?.toDate() >= startOfMonth
+          )
+          .reduce((sum, balance) => sum + (balance.amount || 0), 0);
 
         // Update all states
         setStats({
           totalStudents,
           activeStudents,
-          withBalance,
-          newEnrollees: 0,
+          withBalance: studentsWithBalance,
+          newEnrollees: 0, // You can implement this based on createdAt date
           totalCollections,
           pendingPayments,
           completedPayments,
           collectionRate
         });
 
+        setStudents(studentsData);
+        setTodayCollection(todayCollection);
+        setWeeklyCollection(weeklyCollection);
+        setMonthlyCollection(monthlyCollection);
+
+        // Set recent payments
+        const recentPayments = balancesData
+          .filter(balance => balance.status === 'paid')
+          .sort((a, b) => b.paidAt?.toDate() - a.paidAt?.toDate())
+          .slice(0, 5)
+          .map(balance => ({
+            id: balance.id,
+            studentId: balance.studentId,
+            studentName: studentsData.find(s => s.id === balance.studentId)?.fullName || 'Unknown',
+            amount: balance.amount,
+            createdAt: balance.paidAt
+          }));
+
+        setRecentPayments(recentPayments);
+
+        // Count payment methods
+        const methodCounts = balancesData
+          .filter(balance => balance.status === 'paid')
+          .reduce((acc, balance) => {
+            const method = balance.paymentMethod?.toLowerCase() || 'other';
+            acc[method] = (acc[method] || 0) + 1;
+            return acc;
+          }, {});
+
+        setPaymentMethods({
+          labels: Object.keys(methodCounts),
+          datasets: [{
+            data: Object.values(methodCounts),
+            backgroundColor: [
+              '#4FB3E8',    // GCash
+              '#002147',    // Maya
+              '#0047AB',    // BDO
+              '#FF0000',    // BPI
+              '#00308F',    // UnionBank
+            ],
+            borderWidth: 0
+          }]
+        });
+
+        // Get last 7 days for trends
+        const last7Days = Array.from({length: 7}, (_, i) => {
+          const date = new Date();
+          date.setDate(date.getDate() - (6 - i));
+          return date;
+        });
+
+        // Calculate daily totals for payment trends
+        const dailyTotals = last7Days.map(day => {
+          const startOfDay = new Date(day.setHours(0, 0, 0, 0));
+          const endOfDay = new Date(day.setHours(23, 59, 59, 999));
+          
+          return balancesData
+            .filter(balance => {
+              const paidAt = balance.paidAt?.toDate();
+              return (
+                balance.status === 'paid' &&
+                paidAt >= startOfDay &&
+                paidAt <= endOfDay
+              );
+            })
+            .reduce((sum, balance) => sum + (balance.amount || 0), 0);
+        });
+
+        // Update payment trends state
         setPaymentTrends({
-          labels: last7Days.map(date => date.toLocaleDateString('en-US', { weekday: 'short' })),
+          labels: last7Days.map(date => 
+            date.toLocaleDateString('en-US', { weekday: 'short' })
+          ),
           datasets: [{
             label: 'Daily Collections',
             data: dailyTotals,
@@ -207,42 +267,15 @@ export default function AdminDashboard() {
           }]
         });
 
-        // Update the payment methods chart data with direct counts
-        setPaymentMethods({
-          labels: ['GCash', 'Maya', 'BDO', 'BPI', 'UnionBank'],
-          datasets: [{
-            data: [
-              methodCounts.gcash,
-              methodCounts.maya,
-              methodCounts.bdo,
-              methodCounts.bpi,
-              methodCounts.unionbank
-            ],
-            backgroundColor: [
-              '#4FB3E8',    // GCash - Blue
-              '#002147',    // Maya - Navy
-              '#0047AB',    // BDO - Blue
-              '#FF0000',    // BPI - Red
-              '#00308F',    // UnionBank - Blue
-            ],
-            borderWidth: 0
-          }]
-        });
-
-        setTodayCollection(today);
-        setWeeklyCollection(weekly);
-        setMonthlyCollection(monthly);
-        setRecentPayments(recent);
-
         setLoading(false);
       } catch (error) {
-        console.error('Error fetching data:', error);
+        console.error('Error in fetchData:', error);
         setLoading(false);
       }
     };
 
     fetchData();
-  }, []);
+  }, [user]);
 
   if (loading) {
     return (
@@ -439,6 +472,20 @@ export default function AdminDashboard() {
           </div>
         </div>
       </div>
+
+      {/* Add a button to open the modal */}
+      <button
+        onClick={() => setIsBulkFeesModalOpen(true)}
+        className="bg-[#4FB3E8] text-white px-4 py-2 rounded-md"
+      >
+        Add Bulk Fees
+      </button>
+
+      {/* Render the modal */}
+      <BulkFeesModal 
+        isOpen={isBulkFeesModalOpen}
+        onClose={() => setIsBulkFeesModalOpen(false)}
+      />
     </div>
   );
-} 
+}

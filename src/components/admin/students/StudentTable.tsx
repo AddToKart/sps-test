@@ -4,11 +4,27 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type { Student } from '@/types/student';
 import EditStudentModal from './EditStudentModal';
+import { motion } from 'framer-motion';
 
 interface StudentTableProps {
   students: Student[];
   loading: boolean;
 }
+
+const tableRowVariants = {
+  initial: {
+    opacity: 0,
+    x: -20
+  },
+  animate: (custom: number) => ({
+    opacity: 1,
+    x: 0,
+    transition: {
+      delay: custom * 0.05,
+      duration: 0.3
+    }
+  })
+};
 
 export default function StudentTable({ students, loading }: StudentTableProps) {
   const router = useRouter();
@@ -63,8 +79,15 @@ export default function StudentTable({ students, loading }: StudentTableProps) {
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
-              {students.map((student) => (
-                <tr key={student.id} className="hover:bg-gray-50">
+              {students.map((student, index) => (
+                <motion.tr
+                  key={student.id}
+                  variants={tableRowVariants}
+                  initial="initial"
+                  animate="animate"
+                  custom={index}
+                  className="hover:bg-gray-50"
+                >
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                     {student.studentId}
                   </td>
@@ -108,7 +131,7 @@ export default function StudentTable({ students, loading }: StudentTableProps) {
                       Edit
                     </button>
                   </td>
-                </tr>
+                </motion.tr>
               ))}
             </tbody>
           </table>

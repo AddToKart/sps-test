@@ -7,9 +7,21 @@ import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import type { Student, Balance } from '@/types/student';
 import dynamic from 'next/dynamic';
-const PaymentReceipt = dynamic(() => import('@/components/PaymentReceipt').then(mod => mod.PaymentReceipt), {
-  ssr: false
-});
+import { pdf } from '@react-pdf/renderer';
+import { ReceiptDocument } from '@/components/PaymentReceipt';
+import { onAuthStateChanged } from 'firebase/auth';
+
+const PaymentReceipt = dynamic(
+  () => import('@/components/PaymentReceipt').then(mod => mod.PaymentReceipt),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="flex justify-center items-center h-[600px]">
+        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-gray-900"></div>
+      </div>
+    )
+  }
+);
 
 // Add PaymentMethod type
 type PaymentMethod = {
@@ -52,10 +64,11 @@ export default function StudentDashboard() {
   const router = useRouter();
   const [studentData, setStudentData] = useState({
     id: '',
-    name: '',
+    fullName: '',
     studentId: '',
     grade: '',
-    program: '',
+    strand: '',
+    section: ''
   });
 
   const [balanceData, setBalanceData] = useState({
@@ -87,10 +100,29 @@ export default function StudentDashboard() {
   const [paymentMode, setPaymentMode] = useState<'selected' | 'custom'>('selected');
 
   useEffect(() => {
-    if (!user || !user.email?.endsWith('@student.com')) {
-      router.push('/login');
-      return;
-    }
+    console.log('Dashboard mounted');
+    console.log('Current user:', user);
+    console.log('User email:', user?.email);
+  }, [user]);
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      console.log('Current user:', user?.email);
+      
+      if (!user || !user.email?.endsWith('@icons.com')) {
+        console.log('Unauthorized access, redirecting to login');
+        router.push('/login');
+        return;
+      }
+      
+      setLoading(false);
+    });
+
+    return () => unsubscribe();
+  }, [router]);
+
+  useEffect(() => {
+    if (!user) return;
 
     let unsubscribe: (() => void) | undefined;
 
@@ -106,10 +138,11 @@ export default function StudentDashboard() {
           const data = studentDoc.data();
           setStudentData({
             id: studentDoc.id,
-            name: data.name,
-            studentId: data.studentId,
-            grade: data.grade,
-            program: data.program,
+            fullName: data.fullName || 'Not provided',
+            studentId: data.studentId || '',
+            grade: data.grade || '',
+            strand: data.strand || '',
+            section: data.section || ''
           });
 
           // Fetch balances
@@ -158,7 +191,7 @@ export default function StudentDashboard() {
         unsubscribe();
       }
     };
-  }, [user, router]);
+  }, [user]);
 
   const handleSignOut = async () => {
     try {
@@ -445,8 +478,8 @@ export default function StudentDashboard() {
         });
       }
 
-      // Set receipt data
-      setLastPayment({
+      // Add debug logging
+      console.log('Setting last payment:', {
         balance: {
           amount: paymentMode === 'selected' 
             ? selectedBalances.reduce((sum, b) => sum + b.amount, 0)
@@ -459,7 +492,26 @@ export default function StudentDashboard() {
         paymentMethod,
         referenceNumber
       });
-
+      
+      setLastPayment({
+        balance: {
+          id: selectedBalances[0]?.id || '',
+          amount: paymentMode === 'selected' 
+            ? selectedBalances.reduce((sum, b) => sum + b.amount, 0)
+            : customAmount,
+          type: paymentMode === 'selected'
+            ? selectedBalances.map(b => b.type).join(', ')
+            : 'Custom Payment',
+          status: 'paid',
+          createdAt: new Date(),
+          studentId: studentData.id
+        },
+        paymentMethod,
+        referenceNumber
+      });
+      
+      // Add verification log
+      console.log('ShowReceipt being set to true');
       setShowReceipt(true);
       setIsPaymentModalOpen(false);
       setSelectedBalances([]);
@@ -476,29 +528,98 @@ export default function StudentDashboard() {
 
   // Add ReceiptModal component
   const ReceiptModal = () => {
-    if (!lastPayment) return null;
+    if (!lastPayment || !user?.email) return null;
 
-    return (
-      <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
-        <div className="relative top-20 mx-auto p-5 border w-4/5 max-w-4xl shadow-lg rounded-md bg-white">
-          <div className="mb-4 flex justify-between items-center">
-            <h3 className="text-lg font-medium leading-6 text-gray-900">
-              Payment Receipt
-            </h3>
-            <button
-              onClick={() => setShowReceipt(false)}
-              className="text-gray-500 hover:text-gray-700"
-            >
-              Close
-            </button>
-          </div>
-          <PaymentReceipt
-            studentName={studentData.name}
-            studentEmail={user?.email}
+    const handleDownloadPDF = async () => {
+      try {
+        // Show loading state
+        const button = document.querySelector('#downloadPdfBtn') as HTMLButtonElement;
+        if (button) {
+          button.textContent = 'Generating PDF...';
+          button.disabled = true;
+        }
+
+        const blob = await pdf(
+          <ReceiptDocument
+            studentName={studentData.fullName}
+            studentEmail={user.email}
             balance={lastPayment.balance}
             paymentMethod={lastPayment.paymentMethod}
             referenceNumber={lastPayment.referenceNumber}
           />
+        ).toBlob();
+
+        // Force download using Blob and download attribute
+        const fileName = `receipt-${lastPayment.balance.type}-${new Date().toISOString().split('T')[0]}.pdf`;
+        
+        // Create Blob URL with specific MIME type
+        const blobUrl = window.URL.createObjectURL(
+          new Blob([blob], { type: 'application/pdf' })
+        );
+
+        // Create temporary link with specific attributes
+        const tempLink = document.createElement('a');
+        tempLink.style.display = 'none'; // Hide the link
+        tempLink.href = blobUrl;
+        tempLink.setAttribute('download', fileName); // Set download attribute with filename
+        tempLink.setAttribute('target', '_blank'); // Ensure it doesn't open in new tab
+        
+        // Trigger download
+        document.body.appendChild(tempLink);
+        tempLink.click();
+        
+        // Cleanup
+        setTimeout(() => {
+          document.body.removeChild(tempLink);
+          window.URL.revokeObjectURL(blobUrl);
+        }, 100);
+
+        // Reset button state
+        if (button) {
+          button.textContent = 'Download PDF';
+          button.disabled = false;
+        }
+      } catch (error) {
+        console.error('Error generating PDF:', error);
+        alert('Failed to generate PDF. Please try again.');
+      }
+    };
+
+    return (
+      <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
+        <div className="relative top-20 mx-auto p-5 border w-11/12 max-w-4xl shadow-lg rounded-md bg-white">
+          <div className="mb-4 flex justify-between items-center">
+            <h3 className="text-lg font-medium leading-6 text-gray-900">
+              Payment Receipt
+            </h3>
+            <div className="flex items-center gap-4">
+              <button
+                id="downloadPdfBtn"
+                onClick={handleDownloadPDF}
+                className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 transition-colors text-sm"
+              >
+                Download PDF
+              </button>
+              <button
+                onClick={() => setShowReceipt(false)}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                <span className="sr-only">Close</span>
+                <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+          </div>
+          <div className="overflow-y-auto max-h-[80vh]">
+            <PaymentReceipt
+              studentName={studentData.fullName}
+              studentEmail={user.email}
+              balance={lastPayment.balance}
+              paymentMethod={lastPayment.paymentMethod}
+              referenceNumber={lastPayment.referenceNumber}
+            />
+          </div>
         </div>
       </div>
     );
@@ -553,9 +674,10 @@ export default function StudentDashboard() {
             </svg>
           </div>
           <div>
-            <h2 className="text-xl font-semibold">{studentData.name}</h2>
+            <h2 className="text-xl font-semibold">{studentData.fullName}</h2>
             <p className="text-gray-600 text-sm">
-              Student ID: {studentData.studentId} • Grade: {studentData.grade} • Program: {studentData.program}
+              Student ID: {studentData.studentId} • Grade: {studentData.grade} • 
+              Strand: {studentData.strand} • Section: {studentData.section}
             </p>
           </div>
         </div>
