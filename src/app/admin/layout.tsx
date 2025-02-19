@@ -114,7 +114,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           className="fixed inset-y-0 left-0 w-64 bg-[#002147]"
         >
           <div className="p-4">
-            <h1 className="text-white text-xl font-bold">SPS Admin</h1>
+            <h1 className="text-white text-xl font-bold">E-Paycons Admin</h1>
           </div>
           <nav className="flex-1">
             {navigation.map((item) => (

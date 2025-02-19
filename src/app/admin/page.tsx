@@ -16,7 +16,6 @@ import {
   Legend,
   ArcElement,
 } from 'chart.js';
-import BulkFeesModal from '@/components/admin/BulkFeesModal';
 
 // Register ChartJS components
 ChartJS.register(
@@ -92,7 +91,6 @@ export default function AdminDashboard() {
   const [weeklyCollection, setWeeklyCollection] = useState(0);
   const [monthlyCollection, setMonthlyCollection] = useState(0);
   const [students, setStudents] = useState<Student[]>([]);
-  const [isBulkFeesModalOpen, setIsBulkFeesModalOpen] = useState(false);
 
   useEffect(() => {
     if (!user || !user.email?.endsWith('@admin.com')) {
@@ -472,20 +470,6 @@ export default function AdminDashboard() {
           </div>
         </div>
       </div>
-
-      {/* Add a button to open the modal */}
-      <button
-        onClick={() => setIsBulkFeesModalOpen(true)}
-        className="bg-[#4FB3E8] text-white px-4 py-2 rounded-md"
-      >
-        Add Bulk Fees
-      </button>
-
-      {/* Render the modal */}
-      <BulkFeesModal 
-        isOpen={isBulkFeesModalOpen}
-        onClose={() => setIsBulkFeesModalOpen(false)}
-      />
     </div>
   );
 }

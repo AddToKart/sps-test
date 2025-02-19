@@ -122,7 +122,7 @@ export default function StudentLayout({ children }: { children: React.ReactNode 
         <div className="flex flex-col h-full">
           {/* Logo */}
           <div className="flex items-center justify-center h-16 bg-[#001a38]">
-            <span className="text-xl font-bold">SPS Student</span>
+            <span className="text-xl font-bold">E-Paycons Student</span>
           </div>
 
           {/* Navigation */}
