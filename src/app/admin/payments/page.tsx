@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { db } from '@/lib/firebase/config';
-import { collection, query, onSnapshot, doc, updateDoc, deleteDoc, addDoc, Timestamp, orderBy, getDocs, where } from 'firebase/firestore';
+import { collection, query, onSnapshot, doc, updateDoc, deleteDoc, addDoc, Timestamp, orderBy, getDocs, where, getDoc } from 'firebase/firestore';
 import { Dialog } from '@headlessui/react';
 import PaymentFilters from '@/components/admin/payments/PaymentFilters';
 import PaymentTable from '@/components/admin/payments/PaymentTable';
@@ -14,6 +14,7 @@ import AutomationSettingsModal from '@/components/admin/payments/AutomationSetti
 import MigrateDataButton from '@/components/admin/MigrateDataButton';
 import Toast from '@/components/ui/Toast';
 import toast from 'react-hot-toast';
+import PaymentReminderSettings from '@/components/admin/payments/PaymentReminderSettings';
 
 interface Payment {
   id: string;
@@ -53,6 +54,7 @@ export default function PaymentManagement() {
     paymentMethod: 'all',
     search: ''
   });
+  const [isReminderSettingsOpen, setIsReminderSettingsOpen] = useState(false);
 
   useEffect(() => {
     const studentsQuery = query(collection(db, 'students'));
@@ -180,50 +182,70 @@ export default function PaymentManagement() {
 
   const sendPaymentReminders = async () => {
     try {
+      // Get settings
+      const settingsDoc = await getDoc(doc(db, 'settings', 'paymentReminders'));
+      const settings = settingsDoc.exists() 
+        ? settingsDoc.data() 
+        : defaultSettings;  // Use the same defaultSettings from PaymentReminderSettings
+
       // Get all pending balances
       const balancesQuery = query(
         collection(db, 'balances'),
         where('status', '==', 'pending')
       );
+      
       const balancesSnapshot = await getDocs(balancesQuery);
-      
       let reminderCount = 0;
-      
+
       for (const balanceDoc of balancesSnapshot.docs) {
         const balance = balanceDoc.data();
+        
+        if (!balance.dueDate || !balance.studentEmail || !balance.amount) {
+          continue;
+        }
+
         const dueDate = balance.dueDate.toDate();
         const today = new Date();
         const daysUntilDue = Math.ceil((dueDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
 
-        // Send reminder if due date is within 7 days or overdue
-        if (daysUntilDue <= 7 || daysUntilDue < 0) {
-          // Create notification
-          await addDoc(collection(db, 'notifications'), {
-            studentId: balance.studentId,
-            studentEmail: balance.studentEmail,
-            title: daysUntilDue < 0 ? 'Payment Overdue' : 'Payment Reminder',
-            message: daysUntilDue < 0 
-              ? `Your payment of ₱${balance.amount} for ${balance.type} is overdue.`
-              : `Your payment of ₱${balance.amount} for ${balance.type} is due in ${daysUntilDue} days.`,
-            type: daysUntilDue < 0 ? 'overdue_reminder' : 'payment_reminder',
-            status: 'unread',
-            createdAt: Timestamp.now(),
-            relatedBalanceId: balanceDoc.id,
-            dueDate: balance.dueDate,
-            amount: balance.amount
-          });
-          reminderCount++;
+        // Check both sendAllReminders and daysThreshold
+        if (settings.sendAllReminders || daysUntilDue <= settings.daysThreshold) {
+          try {
+            await addDoc(collection(db, 'notifications'), {
+              studentId: balance.studentId,
+              studentEmail: balance.studentEmail,
+              title: daysUntilDue < 0 ? 'Payment Overdue' : 'Payment Reminder',
+              message: daysUntilDue < 0 
+                ? settings.messageTemplate.overdue
+                    .replace('{amount}', balance.amount.toString())
+                    .replace('{type}', balance.type)
+                    .replace('{days}', Math.abs(daysUntilDue).toString())
+                : settings.messageTemplate.upcoming
+                    .replace('{amount}', balance.amount.toString())
+                    .replace('{type}', balance.type)
+                    .replace('{days}', daysUntilDue.toString()),
+              type: daysUntilDue < 0 ? 'overdue_reminder' : 'payment_reminder',
+              status: 'unread',
+              createdAt: Timestamp.now(),
+              relatedBalanceId: balanceDoc.id,
+              dueDate: balance.dueDate,
+              amount: balance.amount
+            });
+            reminderCount++;
+          } catch (error) {
+            console.error(`Failed to send reminder for balance ${balanceDoc.id}:`, error);
+          }
         }
       }
 
       if (reminderCount > 0) {
         toast.success(`Sent ${reminderCount} payment reminders`);
       } else {
-        toast.success('No payments due soon or overdue');
+        toast.success('No reminders sent');
       }
     } catch (error) {
       console.error('Error sending reminders:', error);
-      toast.error('Failed to send payment reminders');
+      toast.error('Failed to send reminders');
     }
   };
 
@@ -253,6 +275,12 @@ export default function PaymentManagement() {
             Bulk Add Fees
           </button>
           <MigrateDataButton />
+          <button
+            onClick={() => setIsReminderSettingsOpen(true)}
+            className="px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200"
+          >
+            Reminder Settings
+          </button>
           <button
             onClick={sendPaymentReminders}
             className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
@@ -332,6 +360,10 @@ export default function PaymentManagement() {
       <AutomationSettingsModal
         isOpen={isAutomationModalOpen}
         onClose={() => setIsAutomationModalOpen(false)}
+      />
+      <PaymentReminderSettings
+        isOpen={isReminderSettingsOpen}
+        onClose={() => setIsReminderSettingsOpen(false)}
       />
 
       {toastMessage && (

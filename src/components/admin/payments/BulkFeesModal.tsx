@@ -9,6 +9,7 @@ import toast from 'react-hot-toast';
 interface BulkFeesModalProps {
   isOpen: boolean;
   onClose: () => void;
+  onSuccess?: () => void;
 }
 
 const GRADES = ['11', '12'];
@@ -23,7 +24,7 @@ const FEE_TYPES = [
   'Other Fees'
 ];
 
-export default function BulkFeesModal({ isOpen, onClose }: BulkFeesModalProps) {
+export default function BulkFeesModal({ isOpen, onClose, onSuccess }: BulkFeesModalProps) {
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
     feeType: '',
@@ -113,6 +114,7 @@ export default function BulkFeesModal({ isOpen, onClose }: BulkFeesModalProps) {
           strand: 'All',
           section: 'All'
         });
+        onSuccess?.();
         onClose();
       } else {
         toast.error('Failed to add fees to any students');
