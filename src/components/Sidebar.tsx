@@ -1,3 +1,5 @@
+import { HomeIcon, CreditCardIcon, BellIcon, UserIcon, QuestionMarkCircleIcon } from '@heroicons/react/24/outline';
+
 const navigation = [
   { name: 'Overview', href: '/student/dashboard', icon: HomeIcon },
   { name: 'Payments', href: '/student/payments', icon: CreditCardIcon },
