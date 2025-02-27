@@ -4,6 +4,7 @@ import { createContext, useContext, useEffect, useState } from 'react';
 import { auth } from '@/lib/firebase/config';
 import { User } from 'firebase/auth';
 import { useRouter } from 'next/navigation';
+import { signOut as firebaseSignOut } from 'firebase/auth';
 
 interface AuthContextType {
   user: User | null;
@@ -28,6 +29,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     return () => unsubscribe();
   }, []);
+
+  const signOut = async () => {
+    try {
+      await firebaseSignOut(auth);
+    } catch (error) {
+      console.error('Error signing out:', error);
+      throw error;
+    }
+  };
 
   if (loading) {
     return (

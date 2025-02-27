@@ -1,38 +1,17 @@
 'use client';
 
 import { useAuth } from '@/contexts/AuthContext';
-import { useRouter, usePathname } from 'next/navigation';
-import Link from 'next/link';
-import { useEffect } from 'react';
+import { useRouter } from 'next/navigation';
+import { useEffect, useState } from 'react';
 import { auth } from '@/lib/firebase/config';
 import { signOut } from 'firebase/auth';
-import PageTransition from '@/components/animations/PageTransition';
-import { motion } from 'framer-motion';
 import { Toaster } from 'react-hot-toast';
-
-const sidebarVariants = {
-  open: {
-    x: 0,
-    transition: {
-      type: "spring",
-      stiffness: 300,
-      damping: 30
-    }
-  },
-  closed: {
-    x: "-100%",
-    transition: {
-      type: "spring",
-      stiffness: 300,
-      damping: 30
-    }
-  }
-};
+import Sidebar from '@/components/admin/Sidebar';
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
   const router = useRouter();
-  const pathname = usePathname();
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
 
   useEffect(() => {
     if (!user || !user.email?.endsWith('@admin.com')) {
@@ -105,63 +84,17 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   };
 
   return (
-    <>
-      <div className="flex h-screen bg-gray-100">
-        <motion.div 
-          initial="open"
-          animate="open"
-          variants={sidebarVariants}
-          className="fixed inset-y-0 left-0 w-64 bg-[#002147]"
-        >
-          <div className="p-4">
-            <h1 className="text-white text-xl font-bold">E-Paycons Admin</h1>
-          </div>
-          <nav className="flex-1">
-            {navigation.map((item) => (
-              <Link
-                key={item.name}
-                href={item.href}
-                className={`
-                  flex items-center px-4 py-3 text-sm
-                  ${pathname === item.href 
-                    ? 'bg-[#4FB3E8] text-white' 
-                    : 'text-gray-300 hover:bg-[#4FB3E8]/80 hover:text-white'}
-                `}
-              >
-                {item.icon}
-                <span className="ml-3">{item.name}</span>
-              </Link>
-            ))}
-          </nav>
-          <div className="p-4 border-t border-gray-700">
-            <div className="flex items-center">
-              <div className="flex-shrink-0">
-                <svg className="h-8 w-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                </svg>
-              </div>
-              <div className="ml-3">
-                <p className="text-sm text-gray-300">{user?.email}</p>
-                <button
-                  onClick={handleLogout}
-                  className="text-xs text-gray-400 hover:text-white"
-                >
-                  Logout
-                </button>
-              </div>
-            </div>
-          </div>
-        </motion.div>
-
-        <div className="flex-1 overflow-auto pl-64">
-          <main className="p-8">
-            <PageTransition>
-              {children}
-            </PageTransition>
-          </main>
-        </div>
-      </div>
+    <div className="min-h-screen bg-gray-50">
+      <Sidebar onCollapse={setIsSidebarCollapsed} />
+      <main 
+        className={`
+          transition-all duration-300 ease-in-out
+          ${isSidebarCollapsed ? 'pl-20' : 'pl-64'}
+        `}
+      >
+        {children}
+      </main>
       <Toaster position="top-right" />
-    </>
+    </div>
   );
 } 

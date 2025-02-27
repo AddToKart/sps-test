@@ -19,14 +19,14 @@ export interface Student {
 
 export interface Balance {
   id: string;
-  studentId: string;
-  type: string;
   amount: number;
-  status: 'pending' | 'paid';
+  type: string;
+  status: 'pending' | 'paid' | 'overdue';
+  studentId: string;
   dueDate: Timestamp;
-  dueDateString?: string;
-  description?: string;
   createdAt: Timestamp;
-  dateAdded: Timestamp;
-  studentName?: string;
+  paidAt?: Timestamp;
+  paymentMethod?: string;
+  paymentId?: string;
+  updatedAt?: Timestamp;
 } 

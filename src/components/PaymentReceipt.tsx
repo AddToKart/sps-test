@@ -1,297 +1,331 @@
-import { Document, Page, Text, View, StyleSheet, PDFViewer, pdf } from '@react-pdf/renderer';
-import type { Balance } from '@/types/student';
-import React, { useEffect } from 'react';
-import dynamic from 'next/dynamic';
+import React from 'react';
+import { Document, Page, Text, View, StyleSheet, Image, Font, PDFViewer } from '@react-pdf/renderer';
+import { Balance } from '@/types/student';
 
+// Register fonts
+Font.register({
+  family: 'Roboto',
+  fonts: [
+    { src: 'https://cdnjs.cloudflare.com/ajax/libs/ink/3.1.10/fonts/Roboto/roboto-regular-webfont.ttf', fontWeight: 'normal' },
+    { src: 'https://cdnjs.cloudflare.com/ajax/libs/ink/3.1.10/fonts/Roboto/roboto-bold-webfont.ttf', fontWeight: 'bold' },
+  ]
+});
+
+// Create styles
 const styles = StyleSheet.create({
   page: {
-    padding: 50,
-    backgroundColor: '#ffffff',
-    fontFamily: 'Helvetica'
+    flexDirection: 'column',
+    backgroundColor: '#FFFFFF',
+    padding: 30,
+    fontFamily: 'Roboto',
   },
   header: {
-    marginBottom: 30,
-    textAlign: 'center'
+    marginBottom: 20,
+    borderBottom: '1px solid #CCCCCC',
+    paddingBottom: 10,
   },
-  title: {
-    fontSize: 24,
+  logo: {
+    width: 120,
+    height: 50,
     marginBottom: 10,
-    fontWeight: 'bold'
   },
   schoolName: {
     fontSize: 18,
-    marginBottom: 5,
-    color: '#374151'
+    fontWeight: 'bold',
+    color: '#002147',
   },
-  receiptInfo: {
-    marginBottom: 20
+  schoolAddress: {
+    fontSize: 10,
+    color: '#666666',
+    marginBottom: 5,
+  },
+  receiptTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    textAlign: 'center',
+    marginVertical: 15,
+  },
+  section: {
+    marginBottom: 15,
+  },
+  sectionTitle: {
+    fontSize: 12,
+    fontWeight: 'bold',
+    marginBottom: 5,
+    color: '#002147',
   },
   row: {
     flexDirection: 'row',
-    marginBottom: 8,
-    alignItems: 'center'
+    marginBottom: 5,
   },
   label: {
-    width: 150,
-    fontWeight: 'bold',
-    fontSize: 12,
-    color: '#4B5563'
+    fontSize: 10,
+    width: '30%',
+    color: '#666666',
   },
   value: {
-    flex: 1,
-    fontSize: 12,
-    color: '#111827'
+    fontSize: 10,
+    width: '70%',
+    fontWeight: 'bold',
   },
-  divider: {
-    borderBottomWidth: 1,
-    borderBottomColor: '#E5E7EB',
-    borderBottomStyle: 'solid',
-    marginVertical: 20
+  table: {
+    marginTop: 10,
+    marginBottom: 15,
+  },
+  tableHeader: {
+    flexDirection: 'row',
+    backgroundColor: '#F3F4F6',
+    padding: 8,
+    fontSize: 10,
+    fontWeight: 'bold',
+    borderBottom: '1px solid #CCCCCC',
+  },
+  tableRow: {
+    flexDirection: 'row',
+    padding: 8,
+    fontSize: 10,
+    borderBottom: '1px solid #EEEEEE',
+  },
+  col1: {
+    width: '40%',
+  },
+  col2: {
+    width: '30%',
+    textAlign: 'center',
+  },
+  col3: {
+    width: '30%',
+    textAlign: 'right',
+  },
+  totalRow: {
+    flexDirection: 'row',
+    padding: 8,
+    fontSize: 12,
+    fontWeight: 'bold',
+    borderTop: '1px solid #CCCCCC',
+    marginTop: 5,
   },
   footer: {
-    position: 'absolute',
-    bottom: 50,
-    left: 50,
-    right: 50,
-    textAlign: 'center'
-  },
-  footerText: {
+    marginTop: 30,
     fontSize: 10,
-    color: '#6B7280',
-    marginBottom: 5
+    color: '#666666',
+    textAlign: 'center',
   },
-  status: {
-    backgroundColor: '#DEF7EC',
-    color: '#03543F',
-    padding: '4 8',
-    borderRadius: 4,
-    fontSize: 12,
-    alignSelf: 'flex-start'
-  }
+  watermark: {
+    position: 'absolute',
+    top: '50%',
+    left: '25%',
+    transform: 'rotate(-45deg)',
+    fontSize: 60,
+    color: 'rgba(0, 33, 71, 0.05)',
+  },
+  qrCode: {
+    width: 80,
+    height: 80,
+    marginTop: 10,
+  },
+  verification: {
+    fontSize: 8,
+    color: '#666666',
+    marginTop: 5,
+  },
 });
 
-interface ReceiptProps {
+// Define props for the receipt
+interface PaymentReceiptProps {
   studentName: string;
   studentEmail: string;
-  balance: Balance;
+  balance?: {
+    amount: number;
+    type: string;
+    status: string;
+    createdAt: any;
+    paidAt: any;
+  };
   paymentMethod: string;
   referenceNumber: string;
+  isMultiplePayment?: boolean;
+  balances?: Balance[];
+  totalAmount?: number;
 }
 
-const formatCurrency = (amount: number) => {
-  // Force convert to positive number and handle any string conversion
-  const cleanAmount = Math.abs(Number(amount));
-  // Format with standard number formatting
-  const formatted = cleanAmount.toFixed(2);
-  // Add commas for thousands
-  const withCommas = formatted.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
-  return withCommas;
-};
-
-export const ReceiptDocument = ({ 
-  studentName, 
-  studentEmail, 
-  balance, 
-  paymentMethod, 
-  referenceNumber 
-}: ReceiptProps) => (
-  <Document>
-    <Page size="A4" style={styles.page}>
-      <View style={styles.header}>
-        <Text style={styles.title}>Payment Receipt</Text>
-        <Text style={styles.schoolName}>Student Payment System</Text>
-      </View>
-
-      <View style={styles.receiptInfo}>
-        <View style={styles.row}>
-          <Text style={styles.label}>Receipt Date:</Text>
-          <Text style={styles.value}>
-            {new Date().toLocaleDateString('en-PH', {
-              year: 'numeric',
-              month: 'long',
-              day: 'numeric'
-            })}
-          </Text>
-        </View>
-        <View style={styles.row}>
-          <Text style={styles.label}>Student Name:</Text>
-          <Text style={styles.value}>{studentName}</Text>
-        </View>
-        <View style={styles.row}>
-          <Text style={styles.label}>Student Email:</Text>
-          <Text style={styles.value}>{studentEmail}</Text>
-        </View>
-      </View>
-
-      <View style={styles.divider} />
-
-      <View style={styles.receiptInfo}>
-        <View style={styles.row}>
-          <Text style={styles.label}>Payment Type:</Text>
-          <Text style={styles.value}>{balance.type}</Text>
-        </View>
-        <View style={styles.row}>
-          <Text style={styles.label}>Amount Paid:</Text>
-          <Text style={styles.value}>
-            {Math.abs(Number(balance.amount)).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',')}
-          </Text>
-        </View>
-        <View style={styles.row}>
-          <Text style={styles.label}>Payment Method:</Text>
-          <Text style={styles.value}>
-            {paymentMethod.charAt(0).toUpperCase() + paymentMethod.slice(1)}
-          </Text>
-        </View>
-        <View style={styles.row}>
-          <Text style={styles.label}>Reference Number:</Text>
-          <Text style={styles.value}>{referenceNumber}</Text>
-        </View>
-        <View style={styles.row}>
-          <Text style={styles.label}>Payment Status:</Text>
-          <Text style={styles.status}>PAID</Text>
-        </View>
-      </View>
-
-      <View style={styles.divider} />
-
-      <View style={styles.footer}>
-        <Text style={styles.footerText}>
-          This is a computer-generated receipt. No signature required.
-        </Text>
-        <Text style={styles.footerText}>
-          For questions, please contact the school administration.
-        </Text>
-        <Text style={styles.footerText}>
-          Receipt generated on {new Date().toLocaleString('en-PH')}
-        </Text>
-      </View>
-    </Page>
-  </Document>
-);
-
-export const PaymentReceipt = ({ 
-  studentName, 
-  studentEmail, 
-  balance, 
-  paymentMethod, 
-  referenceNumber 
-}: ReceiptProps) => {
-  // Add data verification
-  console.log('Receipt Props:', { studentName, studentEmail, balance, paymentMethod, referenceNumber });
-
-  // Ensure all required data is present and valid
-  if (!studentName || !balance || !paymentMethod || !referenceNumber) {
-    console.error('Missing required receipt data:', { studentName, balance, paymentMethod, referenceNumber });
-    return <div>Error: Missing required receipt data</div>;
-  }
-
-  // Ensure balance amount is a valid number
-  const amount = typeof balance.amount === 'number' ? balance.amount : 0;
-
-  useEffect(() => {
-    console.log('PaymentReceipt mounted with props:', {
-      studentName,
-      studentEmail,
-      balance,
-      paymentMethod,
-      referenceNumber
-    });
-  }, [studentName, studentEmail, balance, paymentMethod, referenceNumber]);
-
+// Create the receipt component for browser rendering
+export const PaymentReceipt: React.FC<PaymentReceiptProps> = ({
+  studentName,
+  studentEmail,
+  balance,
+  paymentMethod,
+  referenceNumber,
+  isMultiplePayment,
+  balances,
+  totalAmount
+}) => {
   return (
-    <div className="w-full h-full bg-white p-8 relative">
-      {/* Preview Receipt */}
-      <div className="mb-16 max-w-2xl mx-auto">
-        <div className="text-center mb-8">
-          <h1 className="text-2xl font-bold mb-2">Payment Receipt</h1>
-          <h2 className="text-xl text-gray-600">Student Payment System</h2>
-        </div>
-
-        <div className="space-y-4 mb-8">
-          <div className="flex justify-between">
-            <span className="font-semibold">Receipt Date:</span>
-            <span>{new Date().toLocaleDateString('en-PH', {
-              year: 'numeric',
-              month: 'long',
-              day: 'numeric'
-            })}</span>
-          </div>
-          <div className="flex justify-between">
-            <span className="font-semibold">Student Name:</span>
-            <span>{studentName}</span>
-          </div>
-          <div className="flex justify-between">
-            <span className="font-semibold">Student Email:</span>
-            <span>{studentEmail}</span>
-          </div>
-        </div>
-
-        <hr className="my-6" />
-
-        <div className="space-y-4 mb-8">
-          <div className="flex justify-between">
-            <span className="font-semibold">Payment Type:</span>
-            <span>{balance.type}</span>
-          </div>
-          <div className="flex justify-between">
-            <span className="font-semibold">Amount Paid:</span>
-            <span>₱{formatCurrency(balance.amount)}</span>
-          </div>
-          <div className="flex justify-between">
-            <span className="font-semibold">Payment Method:</span>
-            <span>{paymentMethod.charAt(0).toUpperCase() + paymentMethod.slice(1)}</span>
-          </div>
-          <div className="flex justify-between">
-            <span className="font-semibold">Reference Number:</span>
-            <span>{referenceNumber}</span>
-          </div>
-          <div className="flex justify-between">
-            <span className="font-semibold">Payment Status:</span>
-            <span className="bg-green-100 text-green-800 px-2 py-1 rounded-full text-sm">
-              PAID
-            </span>
-          </div>
-        </div>
-
-        <hr className="my-6" />
-
-        <div className="text-center text-sm text-gray-500 space-y-1">
-          <p>This is a computer-generated receipt. No signature required.</p>
-          <p>For questions, please contact the school administration.</p>
-          <p>Receipt generated on {new Date().toLocaleString('en-PH')}</p>
-        </div>
-      </div>
-    </div>
+    <PDFViewer style={{ width: '100%', height: 600 }}>
+      <ReceiptDocument
+        studentName={studentName}
+        studentEmail={studentEmail}
+        balance={balance}
+        paymentMethod={paymentMethod}
+        referenceNumber={referenceNumber}
+        isMultiplePayment={isMultiplePayment}
+        balances={balances}
+        totalAmount={totalAmount}
+      />
+    </PDFViewer>
   );
 };
 
-// Wrap the component with dynamic import
-export default dynamic(() => Promise.resolve(PaymentReceipt), {
-  ssr: false
-});
-
-// Add Error Boundary
-class ErrorBoundary extends React.Component<
-  { children: React.ReactNode; fallback: React.ReactNode },
-  { hasError: boolean }
-> {
-  constructor(props: { children: React.ReactNode; fallback: React.ReactNode }) {
-    super(props);
-    this.state = { hasError: false };
-  }
-
-  static getDerivedStateFromError() {
-    return { hasError: true };
-  }
-
-  componentDidCatch(error: Error) {
-    console.error('PDF Rendering Error:', error);
-  }
-
-  render() {
-    if (this.state.hasError) {
-      return this.props.fallback;
+// Create the receipt document for PDF generation
+export const ReceiptDocument: React.FC<PaymentReceiptProps> = ({
+  studentName,
+  studentEmail,
+  balance,
+  paymentMethod,
+  referenceNumber,
+  isMultiplePayment,
+  balances,
+  totalAmount
+}) => {
+  const formatDate = (date: any) => {
+    if (!date) return 'N/A';
+    try {
+      const dateObj = date.toDate ? date.toDate() : new Date(date);
+      return dateObj.toLocaleDateString('en-US', {
+        month: 'long',
+        day: 'numeric',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+      });
+    } catch (error) {
+      return 'N/A';
     }
-    return this.props.children;
-  }
-} 
+  };
+
+  const formatCurrency = (amount: number) => {
+    return amount.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  };
+
+  const getPaymentMethodName = (method: string) => {
+    const methods: Record<string, string> = {
+      'gcash': 'GCash',
+      'maya': 'Maya',
+      'bpi': 'BPI Online',
+      'bdo': 'BDO Online',
+      'unionbank': 'UnionBank',
+      'grabpay': 'GrabPay'
+    };
+    return methods[method] || method;
+  };
+
+  return (
+    <Document>
+      <Page size="A4" style={styles.page}>
+        {/* Watermark */}
+        <Text style={styles.watermark}>PAID</Text>
+        
+        {/* Header */}
+        <View style={styles.header}>
+          <Text style={styles.schoolName}>ICONS SCHOOL</Text>
+          <Text style={styles.schoolAddress}>123 Education Avenue, Metro Manila, Philippines</Text>
+          <Text style={styles.schoolAddress}>Tel: (02) 8123-4567 | Email: info@icons.edu.ph</Text>
+        </View>
+        
+        {/* Receipt Title */}
+        <Text style={styles.receiptTitle}>
+          {isMultiplePayment ? 'MULTIPLE PAYMENTS RECEIPT' : 'OFFICIAL PAYMENT RECEIPT'}
+        </Text>
+        
+        {/* Student Information */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>STUDENT INFORMATION</Text>
+          <View style={styles.row}>
+            <Text style={styles.label}>Name:</Text>
+            <Text style={styles.value}>{studentName}</Text>
+          </View>
+          <View style={styles.row}>
+            <Text style={styles.label}>Email:</Text>
+            <Text style={styles.value}>{studentEmail}</Text>
+          </View>
+        </View>
+        
+        {/* Payment Information */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>PAYMENT INFORMATION</Text>
+          <View style={styles.row}>
+            <Text style={styles.label}>Reference Number:</Text>
+            <Text style={styles.value}>{referenceNumber}</Text>
+          </View>
+          <View style={styles.row}>
+            <Text style={styles.label}>Payment Method:</Text>
+            <Text style={styles.value}>{getPaymentMethodName(paymentMethod)}</Text>
+          </View>
+          <View style={styles.row}>
+            <Text style={styles.label}>Payment Date:</Text>
+            <Text style={styles.value}>{formatDate(isMultiplePayment ? balances?.[0]?.paidAt : balance?.paidAt)}</Text>
+          </View>
+          {!isMultiplePayment && balance && (
+            <>
+              <View style={styles.row}>
+                <Text style={styles.label}>Payment Type:</Text>
+                <Text style={styles.value}>{balance.type}</Text>
+              </View>
+              <View style={styles.row}>
+                <Text style={styles.label}>Amount Paid:</Text>
+                <Text style={styles.value}>₱{formatCurrency(balance.amount)}</Text>
+              </View>
+            </>
+          )}
+        </View>
+        
+        {/* Multiple Payments Table */}
+        {isMultiplePayment && balances && balances.length > 0 && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>PAYMENT DETAILS</Text>
+            <View style={styles.table}>
+              <View style={styles.tableHeader}>
+                <Text style={styles.col1}>Payment Type</Text>
+                <Text style={styles.col2}>Due Date</Text>
+                <Text style={styles.col3}>Amount</Text>
+              </View>
+              
+              {balances.map((item, index) => (
+                <View key={index} style={styles.tableRow}>
+                  <Text style={styles.col1}>{item.type}</Text>
+                  <Text style={styles.col2}>{formatDate(item.dueDate)}</Text>
+                  <Text style={styles.col3}>₱{formatCurrency(item.amount)}</Text>
+                </View>
+              ))}
+              
+              <View style={styles.totalRow}>
+                <Text style={styles.col1}>Total</Text>
+                <Text style={styles.col2}></Text>
+                <Text style={styles.col3}>₱{formatCurrency(totalAmount || balances.reduce((sum, item) => sum + item.amount, 0))}</Text>
+              </View>
+            </View>
+          </View>
+        )}
+        
+        {/* Verification Section */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>VERIFICATION</Text>
+          <View style={styles.row}>
+            <Text style={styles.label}>Status:</Text>
+            <Text style={[styles.value, { color: '#22C55E' }]}>PAID</Text>
+          </View>
+          <Text style={styles.verification}>
+            This receipt was automatically generated and is valid without signature.
+            To verify this receipt, please contact our finance department with the reference number.
+          </Text>
+        </View>
+        
+        {/* Footer */}
+        <View style={styles.footer}>
+          <Text>Thank you for your payment!</Text>
+          <Text>© {new Date().getFullYear()} ICONS School. All rights reserved.</Text>
+        </View>
+      </Page>
+    </Document>
+  );
+}; 

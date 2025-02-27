@@ -3,7 +3,7 @@
 import { Fragment, useState } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
 import { db } from '@/lib/firebase/config';
-import { collection, addDoc, doc, updateDoc } from 'firebase/firestore';
+import { collection, addDoc, doc, getDoc, Timestamp } from 'firebase/firestore';
 
 interface AddFeeModalProps {
   isOpen: boolean;
@@ -24,16 +24,23 @@ export default function AddFeeModal({ isOpen, onClose }: AddFeeModalProps) {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const balanceRef = collection(db, `students/${formData.studentId}/balances`);
+      // First get the student's data for additional info
+      const studentDoc = await getDoc(doc(db, 'students', formData.studentId));
+      const studentData = studentDoc.data();
+
+      // Use the root balances collection instead of subcollection
+      const balanceRef = collection(db, 'balances');
       await addDoc(balanceRef, {
         type: formData.feeType,
         amount: parseFloat(formData.amount),
-        dueDate: new Date(formData.dueDate),
-        description: formData.description,
         status: 'pending',
-        createdAt: new Date(),
-        isRecurring: formData.isRecurring,
-        frequency: formData.frequency
+        studentId: formData.studentId,
+        studentName: studentData?.name || '',
+        studentEmail: studentData?.email || '',
+        dueDate: Timestamp.fromDate(new Date(formData.dueDate)),
+        description: formData.description || '',
+        createdAt: Timestamp.now(),
+        dateAdded: Timestamp.now()
       });
 
       onClose();

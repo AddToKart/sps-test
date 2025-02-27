@@ -1,320 +1,338 @@
 'use client';
 
+import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import { db } from '@/lib/firebase/config';
 import { collection, query, where, getDocs, doc, updateDoc } from 'firebase/firestore';
-import { useRouter } from 'next/navigation';
-import { useEffect, useState } from 'react';
-import type { Student } from '@/types/student';
+import { toast } from 'react-hot-toast';
 
-export default function StudentProfile() {
-  const { user } = useAuth();
+interface StudentInfo {
+  fullName: string;
+  email: string;
+  studentId: string;
+  gradeLevel: string;
+  strand: string;
+  section: string;
+  contactNumber: string;
+  address: string;
+  enrollmentStatus: string;
+  guardianName: string;
+  guardianContact: string;
+  guardianEmail: string;
+  relationship: string;
+}
+
+export default function ProfilePage() {
   const router = useRouter();
+  const { user } = useAuth();
+  const [studentInfo, setStudentInfo] = useState<StudentInfo | null>(null);
   const [loading, setLoading] = useState(true);
-  const [studentData, setStudentData] = useState<Student | null>(null);
-  const [isEditing, setIsEditing] = useState(false);
-  const [editableData, setEditableData] = useState<Partial<Student>>({});
-  const [isSaving, setIsSaving] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editForm, setEditForm] = useState<Partial<StudentInfo>>({});
+  const [updating, setUpdating] = useState(false);
+  const [studentDocId, setStudentDocId] = useState<string>('');
 
   useEffect(() => {
-    if (!user || !user.email?.endsWith('@icons.com')) {
+    if (!user?.email?.endsWith('@icons.com')) {
       router.push('/login');
       return;
     }
 
-    const fetchStudentData = async () => {
+    const fetchStudentInfo = async () => {
       try {
         const studentsRef = collection(db, 'students');
-        const q = query(studentsRef, where('email', '==', user.email));
-        const querySnapshot = await getDocs(q);
+        const studentQuery = query(studentsRef, where('email', '==', user.email));
+        const studentSnapshot = await getDocs(studentQuery);
         
-        if (!querySnapshot.empty) {
-          const studentDoc = querySnapshot.docs[0];
-          const data = { 
-            id: studentDoc.id, 
-            ...studentDoc.data(),
-            fullName: studentDoc.data().fullName || 'Not provided',
-            strand: studentDoc.data().strand || 'Not assigned',
-            section: studentDoc.data().section || 'Not assigned',
-            grade: studentDoc.data().grade || 'Not assigned'
-          } as Student;
-          
-          setStudentData(data);
-          setEditableData({
-            contactNumber: data.contactNumber || '',
-            address: data.address || '',
-            guardianName: data.guardianName || '',
-            guardianContact: data.guardianContact || '',
-            guardianEmail: data.guardianEmail || '',
-            guardianRelationship: data.guardianRelationship || '',
+        if (!studentSnapshot.empty) {
+          const studentData = studentSnapshot.docs[0].data() as StudentInfo;
+          setStudentInfo(studentData);
+          setStudentDocId(studentSnapshot.docs[0].id);
+          setEditForm({
+            contactNumber: studentData.contactNumber || '',
+            address: studentData.address || '',
+            guardianName: studentData.guardianName || '',
+            guardianContact: studentData.guardianContact || '',
+            guardianEmail: studentData.guardianEmail || '',
+            relationship: studentData.relationship || '',
           });
         }
+        
+        setLoading(false);
       } catch (error) {
-        console.error('Error fetching student data:', error);
-      } finally {
+        console.error('Error fetching student info:', error);
         setLoading(false);
       }
     };
 
-    fetchStudentData();
+    fetchStudentInfo();
   }, [user, router]);
 
-  const handleSave = async () => {
-    if (!studentData?.id) return;
+  const handleEditSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setUpdating(true);
 
-    setIsSaving(true);
     try {
-      const studentRef = doc(db, 'students', studentData.id);
-      await updateDoc(studentRef, editableData);
+      const studentRef = doc(db, 'students', studentDocId);
+      await updateDoc(studentRef, editForm);
       
-      setStudentData(prev => prev ? { ...prev, ...editableData } : null);
-      setIsEditing(false);
-      
-      // Show success message
-      alert('Profile updated successfully!');
+      // Update local state
+      setStudentInfo(prev => prev ? { ...prev, ...editForm } : null);
+      setShowEditModal(false);
+      toast.success('Profile updated successfully');
     } catch (error) {
       console.error('Error updating profile:', error);
-      alert('Failed to update profile. Please try again.');
+      toast.error('Failed to update profile');
     } finally {
-      setIsSaving(false);
+      setUpdating(false);
     }
-  };
-
-  const handleCancel = () => {
-    if (studentData) {
-      setEditableData({
-        contactNumber: studentData.contactNumber || '',
-        address: studentData.address || '',
-        guardianName: studentData.guardianName || '',
-        guardianContact: studentData.guardianContact || '',
-        guardianEmail: studentData.guardianEmail || '',
-        guardianRelationship: studentData.guardianRelationship || '',
-      });
-    }
-    setIsEditing(false);
   };
 
   if (loading) {
     return (
       <div className="flex justify-center items-center min-h-screen">
-        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-gray-900"></div>
-      </div>
-    );
-  }
-
-  if (!studentData) {
-    return (
-      <div className="flex justify-center items-center min-h-screen">
-        <div className="text-center">
-          <h2 className="text-2xl font-bold text-gray-800">Student Not Found</h2>
-          <p className="text-gray-600 mt-2">Unable to retrieve student information.</p>
-        </div>
+        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
       </div>
     );
   }
 
   return (
-    <div className="max-w-4xl mx-auto p-6">
-      <div className="bg-white rounded-lg shadow-lg overflow-hidden">
-        {/* Profile Header */}
-        <div className="bg-[#002147] text-white p-6">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-4">
-              <div className="bg-white rounded-full p-3">
-                <svg 
-                  className="w-16 h-16 text-[#002147]" 
-                  fill="none" 
-                  stroke="currentColor" 
-                  viewBox="0 0 24 24"
-                >
-                  <path 
-                    strokeLinecap="round" 
-                    strokeLinejoin="round" 
-                    strokeWidth={2} 
-                    d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" 
-                  />
-                </svg>
-              </div>
-              <div>
-                <h1 className="text-2xl font-bold">{studentData.fullName}</h1>
-                <p className="text-[#4FB3E8]">{studentData.studentId}</p>
-              </div>
+    <div className="p-6 max-w-7xl mx-auto">
+      {/* Profile Header */}
+      <div className="bg-[#002147] text-white rounded-xl p-8 mb-6 relative overflow-hidden">
+        <div className="absolute top-0 right-0 w-64 h-64 bg-blue-500 rounded-full transform translate-x-32 -translate-y-32 opacity-10"></div>
+        <div className="relative z-10 flex items-start justify-between">
+          <div className="flex items-center gap-6">
+            <div className="w-24 h-24 bg-white rounded-full flex items-center justify-center text-[#002147] text-4xl font-bold">
+              {studentInfo?.fullName?.[0]}
             </div>
-            {!isEditing && (
-              <button
-                onClick={() => setIsEditing(true)}
-                className="bg-[#4FB3E8] text-white px-4 py-2 rounded-md hover:bg-[#4FB3E8]/90 transition-colors"
-              >
-                Edit Profile
-              </button>
-            )}
-          </div>
-        </div>
-
-        {/* Profile Content */}
-        <div className="p-6">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {/* Personal Information */}
-            <div className="space-y-6">
-              <div>
-                <h2 className="text-xl font-semibold mb-4">Personal Information</h2>
-                <div className="space-y-4">
-                  <div>
-                    <label className="text-sm text-gray-500">Full Name</label>
-                    <p className="font-medium">{studentData.fullName}</p>
-                  </div>
-                  <div>
-                    <label className="text-sm text-gray-500">Email</label>
-                    <p className="font-medium">{studentData.email}</p>
-                  </div>
-                  <div>
-                    <label className="text-sm text-gray-500">Contact Number</label>
-                    {isEditing ? (
-                      <input
-                        type="text"
-                        value={editableData.contactNumber || ''}
-                        onChange={(e) => setEditableData(prev => ({ ...prev, contactNumber: e.target.value }))}
-                        className="w-full p-2 border rounded-md focus:ring-2 focus:ring-[#4FB3E8] focus:border-[#4FB3E8] outline-none"
-                      />
-                    ) : (
-                      <p className="font-medium">{studentData.contactNumber || 'Not provided'}</p>
-                    )}
-                  </div>
-                  <div>
-                    <label className="text-sm text-gray-500">Address</label>
-                    {isEditing ? (
-                      <input
-                        type="text"
-                        value={editableData.address || ''}
-                        onChange={(e) => setEditableData(prev => ({ ...prev, address: e.target.value }))}
-                        className="w-full p-2 border rounded-md focus:ring-2 focus:ring-[#4FB3E8] focus:border-[#4FB3E8] outline-none"
-                      />
-                    ) : (
-                      <p className="font-medium">{studentData.address || 'Not provided'}</p>
-                    )}
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Academic Information */}
-            <div className="space-y-6">
-              <div>
-                <h2 className="text-xl font-semibold mb-4">Academic Information</h2>
-                <div className="space-y-4">
-                  <div>
-                    <label className="text-sm text-gray-500">Student ID</label>
-                    <p className="font-medium">{studentData.studentId}</p>
-                  </div>
-                  <div>
-                    <label className="text-sm text-gray-500">Grade Level</label>
-                    <p className="font-medium">{studentData.grade}</p>
-                  </div>
-                  <div>
-                    <label className="text-sm text-gray-500">Strand</label>
-                    <p className="font-medium">{studentData.strand}</p>
-                  </div>
-                  <div>
-                    <label className="text-sm text-gray-500">Section</label>
-                    <p className="font-medium">{studentData.section}</p>
-                  </div>
-                  <div>
-                    <label className="text-sm text-gray-500">Enrollment Status</label>
-                    <p className="font-medium">
-                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                        Active
-                      </span>
-                    </p>
-                  </div>
-                </div>
-              </div>
+            <div>
+              <h1 className="text-3xl font-bold mb-2">{studentInfo?.fullName}</h1>
+              <p className="text-blue-200 flex items-center gap-2">
+                <span>{studentInfo?.studentId}</span>
+                <span className="w-1 h-1 bg-blue-200 rounded-full"></span>
+                <span>{studentInfo?.gradeLevel} - {studentInfo?.strand}</span>
+                <span className="w-1 h-1 bg-blue-200 rounded-full"></span>
+                <span>{studentInfo?.section}</span>
+              </p>
             </div>
           </div>
-
-          {/* Guardian Information */}
-          <div className="mt-8">
-            <h2 className="text-xl font-semibold mb-4">Guardian Information</h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div className="space-y-4">
-                <div>
-                  <label className="text-sm text-gray-500">Guardian Name</label>
-                  {isEditing ? (
-                    <input
-                      type="text"
-                      value={editableData.guardianName || ''}
-                      onChange={(e) => setEditableData(prev => ({ ...prev, guardianName: e.target.value }))}
-                      className="w-full p-2 border rounded-md focus:ring-2 focus:ring-[#4FB3E8] focus:border-[#4FB3E8] outline-none"
-                    />
-                  ) : (
-                    <p className="font-medium">{studentData.guardianName || 'Not provided'}</p>
-                  )}
-                </div>
-                <div>
-                  <label className="text-sm text-gray-500">Guardian Contact</label>
-                  {isEditing ? (
-                    <input
-                      type="text"
-                      value={editableData.guardianContact || ''}
-                      onChange={(e) => setEditableData(prev => ({ ...prev, guardianContact: e.target.value }))}
-                      className="w-full p-2 border rounded-md focus:ring-2 focus:ring-[#4FB3E8] focus:border-[#4FB3E8] outline-none"
-                    />
-                  ) : (
-                    <p className="font-medium">{studentData.guardianContact || 'Not provided'}</p>
-                  )}
-                </div>
-              </div>
-              <div className="space-y-4">
-                <div>
-                  <label className="text-sm text-gray-500">Relationship</label>
-                  {isEditing ? (
-                    <input
-                      type="text"
-                      value={editableData.guardianRelationship || ''}
-                      onChange={(e) => setEditableData(prev => ({ ...prev, guardianRelationship: e.target.value }))}
-                      className="w-full p-2 border rounded-md focus:ring-2 focus:ring-[#4FB3E8] focus:border-[#4FB3E8] outline-none"
-                    />
-                  ) : (
-                    <p className="font-medium">{studentData.guardianRelationship || 'Not provided'}</p>
-                  )}
-                </div>
-                <div>
-                  <label className="text-sm text-gray-500">Guardian Email</label>
-                  {isEditing ? (
-                    <input
-                      type="email"
-                      value={editableData.guardianEmail || ''}
-                      onChange={(e) => setEditableData(prev => ({ ...prev, guardianEmail: e.target.value }))}
-                      className="w-full p-2 border rounded-md focus:ring-2 focus:ring-[#4FB3E8] focus:border-[#4FB3E8] outline-none"
-                    />
-                  ) : (
-                    <p className="font-medium">{studentData.guardianEmail || 'Not provided'}</p>
-                  )}
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Save/Cancel Buttons */}
-          {isEditing && (
-            <div className="mt-6 flex justify-end space-x-4">
-              <button
-                onClick={handleCancel}
-                className="px-4 py-2 border border-gray-300 rounded-md hover:bg-gray-50 transition-colors"
-                disabled={isSaving}
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleSave}
-                disabled={isSaving}
-                className="px-4 py-2 bg-[#4FB3E8] text-white rounded-md hover:bg-[#4FB3E8]/90 transition-colors disabled:opacity-50"
-              >
-                {isSaving ? 'Saving...' : 'Save Changes'}
-              </button>
-            </div>
-          )}
+          <button 
+            onClick={() => setShowEditModal(true)}
+            className="bg-blue-500 hover:bg-blue-600 text-white px-6 py-2 rounded-lg transition-colors"
+          >
+            Edit Profile
+          </button>
         </div>
       </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Personal Information Card */}
+        <div className="bg-white rounded-xl shadow-sm overflow-hidden">
+          <div className="p-6 border-b border-gray-100">
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-blue-50 rounded-lg">
+                <svg className="w-5 h-5 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                </svg>
+              </div>
+              <h2 className="text-lg font-semibold text-gray-900">Personal Information</h2>
+            </div>
+          </div>
+          <div className="p-6 space-y-6">
+            <div className="grid grid-cols-1 gap-6">
+              <InfoField label="Full Name" value={studentInfo?.fullName} />
+              <InfoField label="Email" value={studentInfo?.email} />
+              <InfoField label="Contact Number" value={studentInfo?.contactNumber || 'Not provided'} />
+              <InfoField label="Address" value={studentInfo?.address || 'Not provided'} />
+            </div>
+          </div>
+        </div>
+
+        {/* Academic Information Card */}
+        <div className="bg-white rounded-xl shadow-sm overflow-hidden">
+          <div className="p-6 border-b border-gray-100">
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-green-50 rounded-lg">
+                <svg className="w-5 h-5 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 14l9-5-9-5-9 5 9 5z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 14l9-5-9-5-9 5 9 5zm0 0L3 9m9 5v7m9-12v7" />
+                </svg>
+              </div>
+              <h2 className="text-lg font-semibold text-gray-900">Academic Information</h2>
+            </div>
+          </div>
+          <div className="p-6 space-y-6">
+            <div className="grid grid-cols-1 gap-6">
+              <InfoField label="Student ID" value={studentInfo?.studentId} />
+              <InfoField label="Grade Level" value={studentInfo?.gradeLevel} />
+              <InfoField label="Strand" value={studentInfo?.strand} />
+              <InfoField label="Section" value={studentInfo?.section} />
+              <InfoField 
+                label="Enrollment Status" 
+                value={studentInfo?.enrollmentStatus} 
+                customBadge={
+                  <span className="px-2 py-1 text-xs font-medium rounded-full bg-green-100 text-green-800">
+                    Active
+                  </span>
+                }
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Guardian Information Card */}
+        <div className="lg:col-span-2 bg-white rounded-xl shadow-sm overflow-hidden">
+          <div className="p-6 border-b border-gray-100">
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-purple-50 rounded-lg">
+                <svg className="w-5 h-5 text-purple-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+                </svg>
+              </div>
+              <h2 className="text-lg font-semibold text-gray-900">Guardian Information</h2>
+            </div>
+          </div>
+          <div className="p-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <InfoField label="Guardian Name" value={studentInfo?.guardianName || 'Not provided'} />
+              <InfoField label="Relationship" value={studentInfo?.relationship || 'Not provided'} />
+              <InfoField label="Guardian Contact" value={studentInfo?.guardianContact || 'Not provided'} />
+              <InfoField label="Guardian Email" value={studentInfo?.guardianEmail || 'Not provided'} />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Edit Profile Modal */}
+      {showEditModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+            <div className="p-6 border-b border-gray-200 flex justify-between items-center">
+              <h3 className="text-lg font-semibold">Edit Profile</h3>
+              <button
+                onClick={() => setShowEditModal(false)}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <form onSubmit={handleEditSubmit} className="p-6 space-y-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {/* Contact Information */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Contact Number
+                  </label>
+                  <input
+                    type="text"
+                    value={editForm.contactNumber || ''}
+                    onChange={(e) => setEditForm(prev => ({ ...prev, contactNumber: e.target.value }))}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    placeholder="Enter contact number"
+                  />
+                </div>
+
+                {/* Address */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Address
+                  </label>
+                  <input
+                    type="text"
+                    value={editForm.address || ''}
+                    onChange={(e) => setEditForm(prev => ({ ...prev, address: e.target.value }))}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    placeholder="Enter address"
+                  />
+                </div>
+
+                {/* Guardian Information */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Guardian Name
+                  </label>
+                  <input
+                    type="text"
+                    value={editForm.guardianName || ''}
+                    onChange={(e) => setEditForm(prev => ({ ...prev, guardianName: e.target.value }))}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    placeholder="Enter guardian name"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Guardian Contact
+                  </label>
+                  <input
+                    type="text"
+                    value={editForm.guardianContact || ''}
+                    onChange={(e) => setEditForm(prev => ({ ...prev, guardianContact: e.target.value }))}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    placeholder="Enter guardian contact"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Guardian Email
+                  </label>
+                  <input
+                    type="email"
+                    value={editForm.guardianEmail || ''}
+                    onChange={(e) => setEditForm(prev => ({ ...prev, guardianEmail: e.target.value }))}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    placeholder="Enter guardian email"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Relationship
+                  </label>
+                  <input
+                    type="text"
+                    value={editForm.relationship || ''}
+                    onChange={(e) => setEditForm(prev => ({ ...prev, relationship: e.target.value }))}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    placeholder="Enter relationship"
+                  />
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-4">
+                <button
+                  type="button"
+                  onClick={() => setShowEditModal(false)}
+                  className="px-4 py-2 text-gray-700 hover:text-gray-900"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={updating}
+                  className={`px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors ${
+                    updating ? 'opacity-50 cursor-not-allowed' : ''
+                  }`}
+                >
+                  {updating ? 'Saving...' : 'Save Changes'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
-} 
+}
+
+const InfoField = ({ label, value, customBadge }: { label: string; value?: string; customBadge?: React.ReactNode }) => (
+  <div>
+    <p className="text-sm font-medium text-gray-500 mb-1">{label}</p>
+    {customBadge || <p className="text-gray-900">{value}</p>}
+  </div>
+); 
