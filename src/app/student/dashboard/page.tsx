@@ -1001,6 +1001,20 @@ export default function StudentDashboard() {
     }
   };
 
+  // Add these handler functions before the return statement
+  const handleViewStatement = () => {
+    router.push('/student/payments');
+  };
+
+  const handleGetSupport = () => {
+    router.push('/student/support');
+  };
+
+  const handleViewReceipt = (payment: PaymentHistory) => {
+    setLastPayment(payment);
+    setShowReceipt(true);
+  };
+
   if (loading) {
     return (
       <div className="flex justify-center items-center min-h-screen">
@@ -1310,7 +1324,10 @@ export default function StudentDashboard() {
             <span className="font-medium">Make Payment</span>
           </div>
         </button>
-        <button className="p-4 bg-white rounded-xl shadow-sm border border-gray-100 hover:shadow-md transition-shadow">
+        <button 
+          onClick={handleViewStatement}
+          className="p-4 bg-white rounded-xl shadow-sm border border-gray-100 hover:shadow-md transition-shadow"
+        >
           <div className="flex items-center gap-3">
             <div className="p-2 bg-purple-50 rounded-lg">
               <svg className="w-6 h-6 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1320,7 +1337,10 @@ export default function StudentDashboard() {
             <span className="font-medium">View Statement</span>
           </div>
         </button>
-        <button className="p-4 bg-white rounded-xl shadow-sm border border-gray-100 hover:shadow-md transition-shadow">
+        <button 
+          onClick={handleGetSupport}
+          className="p-4 bg-white rounded-xl shadow-sm border border-gray-100 hover:shadow-md transition-shadow"
+        >
           <div className="flex items-center gap-3">
             <div className="p-2 bg-green-50 rounded-lg">
               <svg className="w-6 h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
