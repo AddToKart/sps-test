@@ -20,6 +20,8 @@ interface Balance {
   paidAt: any;
   status: string;
   studentId: string;
+  isMultiplePayment: boolean;
+  balances?: Balance[];
 }
 
 export default function PaymentsPage() {
@@ -42,68 +44,76 @@ export default function PaymentsPage() {
       return;
     }
 
-    const fetchBalances = async () => {
+    const fetchPayments = async () => {
       try {
-        // First get student info
-        const studentsRef = collection(db, 'students');
-        const studentQuery = query(studentsRef, where('email', '==', user.email));
-        const studentSnapshot = await getDocs(studentQuery);
-        
-        if (studentSnapshot.empty) {
-          console.error('Student not found');
-          return;
-        }
+        setLoading(true);
+        if (!user) return;
 
-        const studentId = studentSnapshot.docs[0].id;
-
-        // Get all balances for this student
-        const balancesRef = collection(db, 'balances');
-        const balancesQuery = query(
-          balancesRef,
-          where('studentId', '==', studentId),
+        const paymentsRef = collection(db, 'payments');
+        const q = query(
+          paymentsRef,
+          where('studentId', '==', user.uid),
           orderBy('createdAt', 'desc')
         );
-        const balancesSnapshot = await getDocs(balancesQuery);
 
-        const allBalances = balancesSnapshot.docs.map(doc => ({
+        const paymentsSnapshot = await getDocs(q);
+        const paymentsData = paymentsSnapshot.docs.map(doc => ({
           id: doc.id,
           ...doc.data()
-        })) as Balance[];
+        }));
 
-        setBalances(allBalances);
+        // Process payments for display
+        const processedPayments = paymentsData.map(payment => {
+          // For group payments, set the type to "Group Payment"
+          if (payment.isMultiplePayment) {
+            return {
+              ...payment,
+              type: 'Group Payment',
+              // Calculate total amount if not already set
+              amount: payment.amount || (payment.balances?.reduce((sum, b) => sum + b.amount, 0) || 0)
+            };
+          }
+          return payment;
+        });
 
-        // Calculate statistics from paid balances
-        const paidBalances = allBalances.filter(b => b.status === 'paid');
-        if (paidBalances.length > 0) {
-          const total = paidBalances.reduce((sum, balance) => sum + balance.amount, 0);
-          const average = total / paidBalances.length;
-          
-          const methodCounts = paidBalances.reduce((acc, balance) => {
-            if (balance.paymentMethod) {
-              acc[balance.paymentMethod] = (acc[balance.paymentMethod] || 0) + 1;
-            }
-            return acc;
-          }, {} as { [key: string]: number });
-          
-          const sortedMethods = Object.entries(methodCounts)
-            .sort((a, b) => b[1] - a[1]);
-          
-          setStats({
-            totalPaid: total,
-            averagePayment: average,
-            preferredMethod: sortedMethods.length > 0 ? sortedMethods[0][0] : 'N/A'
-          });
-        }
-
-        setLoading(false);
+        setBalances(processedPayments);
+        
+        // Calculate statistics
+        const totalPaid = processedPayments.reduce((sum, payment) => sum + (Number(payment.amount) || 0), 0);
+        const avgPayment = processedPayments.length > 0 ? totalPaid / processedPayments.length : 0;
+        
+        // Find most used payment method
+        const methodCounts = processedPayments.reduce((acc, payment) => {
+          const method = payment.paymentMethod || 'Unknown';
+          acc[method] = (acc[method] || 0) + 1;
+          return acc;
+        }, {});
+        
+        let preferredMethod = 'None';
+        let maxCount = 0;
+        
+        Object.entries(methodCounts).forEach(([method, count]) => {
+          if (count > maxCount) {
+            maxCount = count;
+            preferredMethod = method;
+          }
+        });
+        
+        setStats({
+          totalPaid,
+          avgPayment,
+          preferredMethod: preferredMethod.charAt(0).toUpperCase() + preferredMethod.slice(1)
+        });
+        
       } catch (error) {
-        console.error('Error fetching balances:', error);
+        console.error('Error fetching payments:', error);
         toast.error('Failed to load payment history');
+      } finally {
         setLoading(false);
       }
     };
 
-    fetchBalances();
+    fetchPayments();
   }, [user, router]);
 
   const filteredBalances = balances.filter(balance => {
@@ -134,6 +144,8 @@ export default function PaymentsPage() {
           balance={payment}
           paymentMethod={payment.paymentMethod}
           referenceNumber={payment.referenceNumber || `REF-${payment.id.substring(0, 8)}`}
+          isMultiplePayment={payment.isMultiplePayment}
+          balances={payment.balances || []}
         />
       ).toBlob();
       
@@ -183,7 +195,7 @@ export default function PaymentsPage() {
               </svg>
             </div>
           </div>
-          <p className="text-3xl font-bold text-gray-900">₱{stats.totalPaid.toLocaleString()}</p>
+          <p className="text-3xl font-bold text-gray-900">₱{stats.totalPaid ? stats.totalPaid.toLocaleString() : '0.00'}</p>
           <p className="text-sm text-gray-500 mt-2">Total payments made</p>
         </div>
 
@@ -196,7 +208,7 @@ export default function PaymentsPage() {
               </svg>
             </div>
           </div>
-          <p className="text-3xl font-bold text-gray-900">₱{stats.averagePayment.toLocaleString(undefined, { maximumFractionDigits: 2 })}</p>
+          <p className="text-3xl font-bold text-gray-900">₱{stats.avgPayment ? stats.avgPayment.toLocaleString() : '0.00'}</p>
           <p className="text-sm text-gray-500 mt-2">Average per transaction</p>
         </div>
 
@@ -361,14 +373,31 @@ export default function PaymentsPage() {
                 <span className="text-gray-600">Reference Number:</span>
                 <span className="font-medium">{selectedBalance.referenceNumber || `REF-${selectedBalance.id.substring(0, 8)}`}</span>
               </div>
-              <div className="flex justify-between mb-2">
-                <span className="text-gray-600">Amount:</span>
-                <span className="font-medium">₱{selectedBalance.amount.toLocaleString()}</span>
-              </div>
-              <div className="flex justify-between mb-2">
-                <span className="text-gray-600">Payment Type:</span>
-                <span className="font-medium">{selectedBalance.type}</span>
-              </div>
+              
+              {selectedBalance.isMultiplePayment ? (
+                <>
+                  <div className="flex justify-between mb-2">
+                    <span className="text-gray-600">Payment Type:</span>
+                    <span className="font-medium">Group Payment</span>
+                  </div>
+                  <div className="flex justify-between mb-2">
+                    <span className="text-gray-600">Total Amount:</span>
+                    <span className="font-medium">₱{selectedBalance.amount.toLocaleString()}</span>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="flex justify-between mb-2">
+                    <span className="text-gray-600">Payment Type:</span>
+                    <span className="font-medium">{selectedBalance.type}</span>
+                  </div>
+                  <div className="flex justify-between mb-2">
+                    <span className="text-gray-600">Amount:</span>
+                    <span className="font-medium">₱{selectedBalance.amount.toLocaleString()}</span>
+                  </div>
+                </>
+              )}
+              
               <div className="flex justify-between mb-2">
                 <span className="text-gray-600">Payment Method:</span>
                 <span className="font-medium">{selectedBalance.paymentMethod}</span>
@@ -384,6 +413,25 @@ export default function PaymentsPage() {
                 </span>
               </div>
             </div>
+            
+            {/* Payment Breakdown for Group Payments */}
+            {selectedBalance.isMultiplePayment && selectedBalance.balances && selectedBalance.balances.length > 0 && (
+              <div className="mb-4">
+                <h4 className="font-medium text-gray-900 mb-2">Payment Breakdown</h4>
+                <div className="bg-gray-50 rounded-md p-3">
+                  {selectedBalance.balances.map((item, index) => (
+                    <div key={index} className="flex justify-between py-1 border-b border-gray-200 last:border-0">
+                      <span className="text-sm">{item.type || 'Payment'}</span>
+                      <span className="text-sm font-medium">₱{(item.amount || 0).toLocaleString()}</span>
+                    </div>
+                  ))}
+                  <div className="flex justify-between pt-2 mt-1 border-t border-gray-300">
+                    <span className="font-medium">Total</span>
+                    <span className="font-medium">₱{(selectedBalance.amount || 0).toLocaleString()}</span>
+                  </div>
+                </div>
+              </div>
+            )}
             
             <div className="text-center text-green-600 mb-4">
               <p className="font-medium">Payment Successful</p>

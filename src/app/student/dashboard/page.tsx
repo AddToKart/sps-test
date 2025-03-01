@@ -346,29 +346,125 @@ export default function StudentDashboard() {
     setSelectedBalances([...pendingBalances]);
   };
 
-  // Handle payment for multiple balances
+  // Update the handleMultiplePayments function to show the payment modal first
   const handleMultiplePayments = () => {
     if (selectedBalances.length === 0) {
-      toast.error('Please select at least one balance to pay');
+      toast.error('No balances selected for payment');
       return;
     }
+
+    // Calculate total amount
+    const totalAmount = selectedBalances.reduce((sum, balance) => sum + balance.amount, 0);
     
-    // If only one balance is selected, use the existing payment flow
-    if (selectedBalances.length === 1) {
-      handlePayNow(selectedBalances[0]);
-      return;
-    }
-    
-    // For multiple balances, open the payment modal with the total amount
+    // Create a combined balance object for the payment modal
     setSelectedBalance({
-      ...selectedBalances[0],
-      amount: totalSelectedAmount,
+      id: 'multiple',
+      amount: totalAmount,
       type: 'Multiple Payments',
       isMultiplePayment: true,
-      balances: selectedBalances
+      balances: selectedBalances,
+      status: 'pending',
+      studentId: user?.uid || '',
+      dueDate: new Date(),
+      createdAt: Timestamp.now()
     } as any);
     
+    // Open the payment modal
     setIsPaymentModalOpen(true);
+  };
+
+  // Update the processMultiplePayments function to properly group payments
+  const processMultiplePayments = async (paymentMethod, referenceNumber) => {
+    try {
+      setProcessingPayment(true);
+      
+      // Calculate total amount
+      const totalAmount = selectedBalances.reduce((sum, balance) => sum + balance.amount, 0);
+      
+      // Create a single payment record for all balances
+      const paymentRef = await addDoc(collection(db, 'payments'), {
+        studentId: user?.uid,
+        amount: totalAmount,
+        paymentMethod: paymentMethod,
+        referenceNumber: referenceNumber,
+        status: 'completed',
+        type: 'Multiple Payments',
+        createdAt: Timestamp.now(),
+        paidAt: Timestamp.now(),
+        isMultiplePayment: true,
+        balanceIds: selectedBalances.map(b => b.id),
+        // Store the details of each balance for the receipt
+        balances: selectedBalances.map(b => ({
+          id: b.id,
+          type: b.type,
+          amount: b.amount,
+          dueDate: b.dueDate
+        }))
+      });
+      
+      // Update all selected balances to reference this payment
+      const updatePromises = selectedBalances.map(balance => 
+        updateDoc(doc(db, 'balances', balance.id), {
+          status: 'completed',
+          paidAt: Timestamp.now(),
+          paymentMethod: paymentMethod,
+          referenceNumber: referenceNumber,
+          groupPaymentId: paymentRef.id // Add reference to the group payment
+        })
+      );
+      
+      await Promise.all(updatePromises);
+      
+      // Log the activity
+      await ActivityService.logActivityWithSafeMetadata({
+        type: 'payment',
+        action: 'multiple_payments_completed',
+        description: `Group payment of ₱${totalAmount.toLocaleString()} completed`,
+        userId: user?.uid || '',
+        userType: 'student',
+        metadata: {
+          paymentId: paymentRef.id,
+          balanceIds: selectedBalances.map(b => b.id),
+          studentId: user?.uid || '',
+          studentEmail: user?.email || '',
+          amount: totalAmount,
+          paymentMethod: paymentMethod,
+          referenceNumber: referenceNumber
+        }
+      });
+      
+      // Set the last payment for receipt
+      setLastPayment({
+        id: paymentRef.id,
+        amount: totalAmount,
+        type: 'Group Payment',
+        paymentMethod: paymentMethod,
+        referenceNumber: referenceNumber,
+        createdAt: Timestamp.now(),
+        paidAt: Timestamp.now(),
+        status: 'completed',
+        isMultiplePayment: true,
+        balances: selectedBalances.map(b => ({
+          id: b.id,
+          type: b.type,
+          amount: b.amount,
+          dueDate: b.dueDate
+        }))
+      });
+      
+      // Show receipt
+      setShowReceipt(true);
+      setIsPaymentModalOpen(false);
+      
+      toast.success('Multiple payments processed successfully!');
+      fetchBalances(); // Refresh balances
+      
+    } catch (error) {
+      console.error('Error processing multiple payments:', error);
+      toast.error('Failed to process payments. Please try again.');
+    } finally {
+      setProcessingPayment(false);
+    }
   };
 
   const handleSignOut = async () => {
@@ -741,91 +837,14 @@ export default function StudentDashboard() {
     }
   };
 
-  // Add the PaymentModal component
-  const PaymentModal = () => {
-    if (!selectedBalance) return null;
-    
-    return (
-      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-        <div className="bg-white rounded-lg p-6 max-w-md w-full">
-          <div className="flex justify-between items-center mb-6">
-            <h2 className="text-xl font-semibold">Make Payment</h2>
-            <button 
-              onClick={() => setIsPaymentModalOpen(false)}
-              className="text-gray-500 hover:text-gray-700"
-            >
-              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
-          </div>
-          
-          <div className="mb-6">
-            <h3 className="font-medium text-gray-900 mb-2">{selectedBalance.type}</h3>
-            <p className="text-3xl font-bold text-gray-900">₱{formatCurrency(selectedBalance.amount)}</p>
-            {selectedBalance.dueDate && (
-              <p className="text-sm text-gray-500 mt-1">
-                Due: {formatDate(selectedBalance.dueDate)}
-              </p>
-            )}
-          </div>
-          
-          <div className="mb-6">
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Select Payment Method
-            </label>
-            <div className="grid grid-cols-2 gap-3">
-              {PAYMENT_METHODS.map((method) => (
-                <div
-                  key={method.id}
-                  onClick={() => setSelectedPaymentMethod(method.id)}
-                  className={`border rounded-lg p-3 cursor-pointer transition-colors ${
-                    selectedPaymentMethod === method.id
-                      ? 'border-blue-500 bg-blue-50'
-                      : 'border-gray-200 hover:border-blue-200'
-                  }`}
-                >
-                  <div className="flex items-center">
-                    <span className="text-xl mr-2">{method.icon}</span>
-                    <span className="font-medium">{method.name}</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-          
-          <div className="flex justify-end space-x-3">
-            <button
-              onClick={() => setIsPaymentModalOpen(false)}
-              className="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={() => {
-                if (!selectedPaymentMethod) {
-                  toast.error('Please select a payment method');
-                  return;
-                }
-                handlePayment(selectedBalance.id);
-              }}
-              disabled={processingPayment || !selectedPaymentMethod}
-              className={`px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
-                processingPayment || !selectedPaymentMethod ? 'opacity-50 cursor-not-allowed' : ''
-              }`}
-            >
-              {processingPayment ? 'Processing...' : 'Confirm Payment'}
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  };
-
-  // Update the generatePDFReceipt function to include student ID
+  // Update the generatePDFReceipt function to properly handle PDF generation
   const generatePDFReceipt = async (payment) => {
     try {
       console.log('Generating PDF receipt for payment:', payment);
+      
+      // Import the pdf function and ReceiptDocument component
+      const { pdf } = await import('@react-pdf/renderer');
+      const ReceiptDocument = (await import('@/components/student/ReceiptDocument')).default;
       
       // Create the PDF document using the ReceiptDocument component
       const blob = await pdf(
@@ -836,6 +855,8 @@ export default function StudentDashboard() {
           balance={payment}
           paymentMethod={payment.paymentMethod}
           referenceNumber={payment.referenceNumber || `REF-${payment.id.substring(0, 8)}`}
+          isMultiplePayment={payment.isMultiplePayment}
+          balances={payment.balances || []}
         />
       ).toBlob();
       
@@ -857,7 +878,7 @@ export default function StudentDashboard() {
     }
   };
 
-  // Add the ReceiptModal component with enhanced details
+  // Add the ReceiptModal component to the dashboard page
   const ReceiptModal = () => {
     if (!lastPayment) return null;
     
@@ -883,10 +904,6 @@ export default function StudentDashboard() {
           
           <div className="border-t border-b border-gray-200 py-4 mb-4">
             <div className="flex justify-between mb-2">
-              <span className="text-gray-600">Student Name:</span>
-              <span className="font-medium">{studentInfo?.fullName}</span>
-            </div>
-            <div className="flex justify-between mb-2">
               <span className="text-gray-600">Student ID:</span>
               <span className="font-medium">{studentInfo?.studentId}</span>
             </div>
@@ -894,23 +911,53 @@ export default function StudentDashboard() {
               <span className="text-gray-600">Reference Number:</span>
               <span className="font-medium">{lastPayment.referenceNumber || `REF-${lastPayment.id.substring(0, 8)}`}</span>
             </div>
-            <div className="flex justify-between mb-2">
-              <span className="text-gray-600">Amount:</span>
-              <span className="font-medium">₱{formatCurrency(lastPayment.amount)}</span>
-            </div>
-            <div className="flex justify-between mb-2">
-              <span className="text-gray-600">Payment Type:</span>
-              <span className="font-medium">{lastPayment.type}</span>
-            </div>
+            {!lastPayment.isMultiplePayment ? (
+              <>
+                <div className="flex justify-between mb-2">
+                  <span className="text-gray-600">Payment Type:</span>
+                  <span className="font-medium">{lastPayment.type}</span>
+                </div>
+                <div className="flex justify-between mb-2">
+                  <span className="text-gray-600">Amount:</span>
+                  <span className="font-medium">₱{lastPayment.amount.toLocaleString()}</span>
+                </div>
+              </>
+            ) : (
+              <div className="flex justify-between mb-2">
+                <span className="text-gray-600">Total Amount:</span>
+                <span className="font-medium">₱{lastPayment.amount.toLocaleString()}</span>
+              </div>
+            )}
             <div className="flex justify-between mb-2">
               <span className="text-gray-600">Payment Method:</span>
               <span className="font-medium">{lastPayment.paymentMethod}</span>
             </div>
             <div className="flex justify-between mb-2">
               <span className="text-gray-600">Date:</span>
-              <span className="font-medium">{formatDate(lastPayment.createdAt)}</span>
+              <span className="font-medium">
+                {formatDate(lastPayment.paidAt || lastPayment.createdAt)}
+              </span>
             </div>
           </div>
+          
+          {/* Multiple Payments Breakdown */}
+          {lastPayment.isMultiplePayment && lastPayment.balances && lastPayment.balances.length > 0 && (
+            <div className="mb-4">
+              <h4 className="font-medium text-gray-900 mb-2">Payment Breakdown</h4>
+              <div className="bg-gray-50 rounded-md p-3">
+                {lastPayment.balances.map((item, index) => (
+                  <div key={index} className="flex justify-between py-1 border-b border-gray-200 last:border-0">
+                    <span className="text-sm">{item.type}</span>
+                    <span className="text-sm font-medium">₱{item.amount.toLocaleString()}</span>
+                  </div>
+                ))}
+                <div className="flex justify-between pt-2 mt-1 border-t border-gray-300">
+                  <span className="font-medium">Total</span>
+                  <span className="font-medium">₱{lastPayment.amount.toLocaleString()}</span>
+                </div>
+              </div>
+            </div>
+          )}
           
           <div className="text-center text-green-600 mb-4">
             <p className="font-medium">Payment Successful</p>
@@ -934,6 +981,42 @@ export default function StudentDashboard() {
         </div>
       </div>
     );
+  };
+
+  // Update the fetchPaymentHistory function to handle grouped payments
+  const fetchPaymentHistory = async () => {
+    try {
+      if (!user) return;
+      
+      const paymentsRef = collection(db, 'payments');
+      const q = query(
+        paymentsRef,
+        where('studentId', '==', user.uid),
+        orderBy('createdAt', 'desc'),
+        limit(5)
+      );
+      
+      const paymentsSnapshot = await getDocs(q);
+      const paymentsData = paymentsSnapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      }));
+      
+      // Set recent payments
+      setRecentPayments(paymentsData);
+      
+      // Count completed payments
+      const completedCount = paymentsData.length;
+      
+      // Update payment stats
+      setPaymentStats(prev => ({
+        ...prev,
+        completed: completedCount
+      }));
+      
+    } catch (error) {
+      console.error('Error fetching payment history:', error);
+    }
   };
 
   if (loading) {
@@ -1455,7 +1538,18 @@ export default function StudentDashboard() {
       </div>
 
       {/* Modals */}
-      {isPaymentModalOpen && selectedBalance && <PaymentModal />}
+      {isPaymentModalOpen && selectedBalance && (
+        <PaymentModal 
+          selectedBalance={selectedBalance}
+          setSelectedBalance={setSelectedBalance}
+          setIsPaymentModalOpen={setIsPaymentModalOpen}
+          setLastPayment={setLastPayment}
+          setShowReceipt={setShowReceipt}
+          selectedBalances={selectedBalances}
+          fetchBalances={fetchBalances}
+          processMultiplePayments={processMultiplePayments}
+        />
+      )}
       {showReceipt && lastPayment && <ReceiptModal />}
     </div>
   );
