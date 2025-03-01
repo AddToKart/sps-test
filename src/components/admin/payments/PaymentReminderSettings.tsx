@@ -1,146 +1,108 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { Dialog } from '@headlessui/react';
+import { Fragment, useState, useEffect } from 'react';
+import { Dialog, Transition } from '@headlessui/react';
 import { db } from '@/lib/firebase/config';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
-import { toast } from 'react-hot-toast';
-import MessageTemplateEditor from './MessageTemplateEditor';
+import toast from 'react-hot-toast';
 
 interface PaymentReminderSettingsProps {
   isOpen: boolean;
   onClose: () => void;
 }
 
-interface ReminderSettings {
-  sendAllReminders: boolean;
-  daysThreshold: number;
-  reminderFrequency: 'daily' | 'weekly' | 'custom';
-  customDays: number[];
-  includeOverdue: boolean;
-  messageTemplate: {
-    upcoming: string;
-    overdue: string;
-  };
-}
-
-const defaultSettings: ReminderSettings = {
-  sendAllReminders: false,
-  daysThreshold: 7,
-  reminderFrequency: 'weekly',
-  customDays: [7, 3, 1],
-  includeOverdue: true,
-  messageTemplate: {
-    upcoming: 'Your payment of ₱{amount} for {type} is due in {days} days.',
-    overdue: 'Your payment of ₱{amount} for {type} is overdue by {days} days.'
-  }
-};
-
 export default function PaymentReminderSettings({ isOpen, onClose }: PaymentReminderSettingsProps) {
-  const [settings, setSettings] = useState<ReminderSettings>(defaultSettings);
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
+  const [settings, setSettings] = useState({
+    sendAllReminders: false,
+    daysThreshold: 7,
+    reminderFrequency: 'weekly',
+    customDays: [7, 3, 1],
+    includeOverdue: true,
+    messageTemplate: {
+      upcoming: 'Your payment of ₱{amount} for {type} is due in {days} days.',
+      overdue: 'Your payment of ₱{amount} for {type} is overdue by {days} days.'
+    }
+  });
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     const fetchSettings = async () => {
       try {
-        const settingsDoc = await getDoc(doc(db, 'settings', 'paymentReminders'));
+        const settingsDoc = await getDoc(doc(db, 'settings', 'reminders'));
         if (settingsDoc.exists()) {
-          setSettings({
-            ...defaultSettings,
-            ...settingsDoc.data() as ReminderSettings
-          });
+          setSettings(settingsDoc.data() as any);
         }
       } catch (error) {
-        console.error('Error fetching settings:', error);
-        toast.error('Failed to load settings');
-      } finally {
-        setLoading(false);
+        console.error('Error fetching reminder settings:', error);
       }
     };
 
-    fetchSettings();
-  }, []);
+    if (isOpen) {
+      fetchSettings();
+    }
+  }, [isOpen]);
 
-  const handleSave = async () => {
-    setSaving(true);
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    
     try {
-      await setDoc(doc(db, 'settings', 'paymentReminders'), settings);
-      toast.success('Settings saved successfully');
+      await setDoc(doc(db, 'settings', 'reminders'), settings);
+      toast.success('Reminder settings saved successfully');
       onClose();
     } catch (error) {
-      console.error('Error saving settings:', error);
-      toast.error('Failed to save settings');
+      console.error('Error saving reminder settings:', error);
+      toast.error('Failed to save reminder settings');
     } finally {
-      setSaving(false);
+      setLoading(false);
     }
   };
 
-  if (loading) {
-    return null;
-  }
-
   return (
-    <Dialog open={isOpen} onClose={onClose} className="relative z-50">
-      <div className="fixed inset-0 bg-black/30" aria-hidden="true" />
-      
-      <div className="fixed inset-0 flex items-center justify-center p-4">
-        <Dialog.Panel className="mx-auto max-w-sm rounded-lg bg-white p-6">
-          <Dialog.Title className="text-lg font-medium mb-4">
-            Payment Reminder Settings
-          </Dialog.Title>
-
-          <div className="space-y-6">
-            <div className="space-y-4">
-              <div className="flex items-center space-x-2">
+    <Transition show={isOpen} as={Fragment}>
+      <Dialog onClose={onClose} className="relative z-50">
+        <div className="fixed inset-0 bg-black/30" />
+        <div className="fixed inset-0 flex items-center justify-center p-4">
+          <Dialog.Panel className="bg-white rounded-lg shadow-xl p-6 w-full max-w-md">
+            <Dialog.Title className="text-lg font-medium mb-4">Payment Reminder Settings</Dialog.Title>
+            
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div className="flex items-center mb-4">
                 <input
                   type="checkbox"
                   id="sendAllReminders"
                   checked={settings.sendAllReminders}
-                  onChange={(e) => setSettings(prev => ({
-                    ...prev,
-                    sendAllReminders: e.target.checked
-                  }))}
-                  className="rounded border-gray-300"
+                  onChange={(e) => setSettings({ ...settings, sendAllReminders: e.target.checked })}
+                  className="h-4 w-4 text-[#4FB3E8] focus:ring-[#4FB3E8] border-gray-300 rounded"
                 />
-                <label htmlFor="sendAllReminders">
-                  Send reminders for all pending payments
+                <label htmlFor="sendAllReminders" className="ml-2 block text-sm text-gray-700">
+                  Send Reminders for All Upcoming Payments
                 </label>
               </div>
 
               {!settings.sendAllReminders && (
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Days threshold for reminders
+                    Days Before Due Date
                   </label>
                   <input
                     type="number"
                     value={settings.daysThreshold}
-                    onChange={(e) => setSettings(prev => ({
-                      ...prev,
-                      daysThreshold: parseInt(e.target.value) || 7
-                    }))}
+                    onChange={(e) => setSettings({ ...settings, daysThreshold: parseInt(e.target.value) })}
+                    className="block w-full rounded-md border-gray-300 shadow-sm focus:border-[#4FB3E8] focus:ring-[#4FB3E8]"
                     min="1"
-                    max="30"
-                    className="w-full rounded-md border border-gray-300 px-3 py-2"
                   />
-                  <p className="text-sm text-gray-500 mt-1">
-                    Send reminders when payment is due within this many days
-                  </p>
                 </div>
               )}
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
+                <label className="block text-sm font-medium text-gray-700 mb-1">
                   Reminder Frequency
                 </label>
                 <select
                   value={settings.reminderFrequency}
-                  onChange={(e) => setSettings(prev => ({
-                    ...prev,
-                    reminderFrequency: e.target.value as 'daily' | 'weekly' | 'custom'
-                  }))}
-                  className="w-full rounded-md border border-gray-300 px-3 py-2"
+                  onChange={(e) => setSettings({ ...settings, reminderFrequency: e.target.value })}
+                  className="block w-full rounded-md border-gray-300 shadow-sm focus:border-[#4FB3E8] focus:ring-[#4FB3E8]"
                 >
                   <option value="daily">Daily</option>
                   <option value="weekly">Weekly</option>
@@ -150,55 +112,105 @@ export default function PaymentReminderSettings({ isOpen, onClose }: PaymentRemi
 
               {settings.reminderFrequency === 'custom' && (
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Custom Reminder Days
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Custom Reminder Days (comma separated)
                   </label>
                   <input
                     type="text"
                     value={settings.customDays.join(', ')}
                     onChange={(e) => {
-                      const days = e.target.value
-                        .split(',')
-                        .map(d => parseInt(d.trim()))
-                        .filter(d => !isNaN(d));
-                      setSettings(prev => ({ ...prev, customDays: days }));
+                      const daysArray = e.target.value.split(',').map(day => parseInt(day.trim())).filter(day => !isNaN(day));
+                      setSettings({ ...settings, customDays: daysArray });
                     }}
-                    className="w-full rounded-md border border-gray-300 px-3 py-2"
-                    placeholder="e.g., 7, 3, 1"
+                    className="block w-full rounded-md border-gray-300 shadow-sm focus:border-[#4FB3E8] focus:ring-[#4FB3E8]"
+                    placeholder="7, 3, 1"
                   />
-                  <p className="text-sm text-gray-500 mt-1">
-                    Enter days before due date, separated by commas
+                  <p className="mt-1 text-xs text-gray-500">
+                    Days before due date to send reminders
                   </p>
                 </div>
               )}
 
-              <MessageTemplateEditor
-                value={settings.messageTemplate}
-                onChange={(templates) => setSettings(prev => ({
-                  ...prev,
-                  messageTemplate: templates
-                }))}
-              />
-            </div>
+              <div className="flex items-center">
+                <input
+                  type="checkbox"
+                  id="includeOverdue"
+                  checked={settings.includeOverdue}
+                  onChange={(e) => setSettings({ ...settings, includeOverdue: e.target.checked })}
+                  className="h-4 w-4 text-[#4FB3E8] focus:ring-[#4FB3E8] border-gray-300 rounded"
+                />
+                <label htmlFor="includeOverdue" className="ml-2 block text-sm text-gray-700">
+                  Include Overdue Payment Reminders
+                </label>
+              </div>
 
-            <div className="mt-6 flex justify-end space-x-3">
-              <button
-                onClick={onClose}
-                className="px-4 py-2 text-gray-600 hover:text-gray-800"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleSave}
-                disabled={saving}
-                className="px-4 py-2 bg-[#4FB3E8] text-white rounded-md hover:bg-[#4FB3E8]/90 disabled:opacity-50"
-              >
-                {saving ? 'Saving...' : 'Save Changes'}
-              </button>
-            </div>
-          </div>
-        </Dialog.Panel>
-      </div>
-    </Dialog>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Upcoming Payment Message Template
+                </label>
+                <textarea
+                  value={settings.messageTemplate.upcoming}
+                  onChange={(e) => setSettings({
+                    ...settings,
+                    messageTemplate: {
+                      ...settings.messageTemplate,
+                      upcoming: e.target.value
+                    }
+                  })}
+                  className="block w-full rounded-md border-gray-300 shadow-sm focus:border-[#4FB3E8] focus:ring-[#4FB3E8]"
+                  rows={2}
+                ></textarea>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Overdue Payment Message Template
+                </label>
+                <textarea
+                  value={settings.messageTemplate.overdue}
+                  onChange={(e) => setSettings({
+                    ...settings,
+                    messageTemplate: {
+                      ...settings.messageTemplate,
+                      overdue: e.target.value
+                    }
+                  })}
+                  className="block w-full rounded-md border-gray-300 shadow-sm focus:border-[#4FB3E8] focus:ring-[#4FB3E8]"
+                  rows={2}
+                ></textarea>
+                <p className="mt-1 text-xs text-gray-500">
+                  You can use {'{amount}'}, {'{type}'}, and {'{days}'} as placeholders.
+                </p>
+              </div>
+
+              <div className="flex justify-end space-x-4 pt-4">
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="px-4 py-2 text-gray-700 hover:text-gray-900"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="px-4 py-2 bg-[#4FB3E8] text-white rounded-md hover:bg-[#4FB3E8]/90 flex items-center"
+                >
+                  {loading ? (
+                    <>
+                      <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                      </svg>
+                      Saving...
+                    </>
+                  ) : 'Save Settings'}
+                </button>
+              </div>
+            </form>
+          </Dialog.Panel>
+        </div>
+      </Dialog>
+    </Transition>
   );
 } 

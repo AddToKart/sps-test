@@ -18,8 +18,27 @@ interface Student {
   createdAt: any;
 }
 
-const STRANDS = ['ABM', 'HUMSS', 'ICT', 'STEM'];
-const SECTIONS = ['St. Albert', 'St. Agnes', 'St. Matthew'];
+const STRANDS = ['STEM', 'ABM', 'HUMSS', 'ICT', 'GAS', 'HRTCO'];
+const GRADES = ['11', '12'];
+
+const STRAND_SECTIONS = {
+  '11': {
+    'STEM': ['St. Albert', 'St. Augustine', 'St. Thomas Aquinas'],
+    'ABM': ['St. Matthew', 'St. Mark', 'St. Luke'],
+    'HUMSS': ['St. Peter', 'St. Paul', 'St. John'],
+    'ICT': ['St. Isidore', 'St. Benedict', 'St. Francis'],
+    'GAS': ['St. Joseph', 'St. Michael', 'St. Gabriel'],
+    'HRTCO': ['St. Martha', 'St. Catherine', 'St. Teresa']
+  },
+  '12': {
+    'STEM': ['St. Dominic', 'St. Francis', 'St. Thomas More'],
+    'ABM': ['St. Vincent', 'St. Anthony', 'St. Nicholas'],
+    'HUMSS': ['St. Jerome', 'St. Augustine', 'St. Ambrose'],
+    'ICT': ['St. Clare', 'St. Cecilia', 'St. Agnes'],
+    'GAS': ['St. Christopher', 'St. Sebastian', 'St. George'],
+    'HRTCO': ['St. Elizabeth', 'St. Rose', 'St. Anne']
+  }
+};
 
 export default function StudentsPage() {
   const { user } = useAuth();
@@ -27,9 +46,12 @@ export default function StudentsPage() {
   const [students, setStudents] = useState<Student[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
-  const [filterStrand, setFilterStrand] = useState('');
-  const [filterSection, setFilterSection] = useState('');
-  const [filterGrade, setFilterGrade] = useState('');
+  const [filters, setFilters] = useState({
+    strand: 'All Strands',
+    grade: 'All Grades',
+    section: 'All Sections'
+  });
+  const [availableSections, setAvailableSections] = useState<string[]>([]);
 
   useEffect(() => {
     const fetchStudents = async () => {
@@ -51,15 +73,50 @@ export default function StudentsPage() {
     fetchStudents();
   }, []);
 
+  useEffect(() => {
+    if (filters.strand === 'All Strands' || filters.grade === 'All Grades') {
+      setAvailableSections([]);
+      setFilters(prev => ({...prev, section: 'All Sections'}));
+    } else {
+      const sections = STRAND_SECTIONS[filters.grade]?.[filters.strand] || [];
+      setAvailableSections(sections);
+    }
+  }, [filters.strand, filters.grade]);
+
+  const handleStrandChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const newStrand = e.target.value;
+    setFilters({
+      ...filters,
+      strand: newStrand,
+      section: 'All Sections'
+    });
+  };
+
+  const handleGradeChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const newGrade = e.target.value;
+    setFilters({
+      ...filters,
+      grade: newGrade,
+      section: 'All Sections'
+    });
+  };
+
+  const handleSectionChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    setFilters({
+      ...filters,
+      section: e.target.value
+    });
+  };
+
   const filteredStudents = students.filter(student => {
     const matchesSearch = 
       student.fullName.toLowerCase().includes(searchTerm.toLowerCase()) ||
       student.studentId.toLowerCase().includes(searchTerm.toLowerCase()) ||
       student.email.toLowerCase().includes(searchTerm.toLowerCase());
     
-    const matchesStrand = filterStrand ? student.strand === filterStrand : true;
-    const matchesSection = filterSection ? student.section === filterSection : true;
-    const matchesGrade = filterGrade ? student.grade === filterGrade : true;
+    const matchesStrand = filters.strand === 'All Strands' ? true : student.strand === filters.strand;
+    const matchesSection = filters.section === 'All Sections' ? true : student.section === filters.section;
+    const matchesGrade = filters.grade === 'All Grades' ? true : student.grade === filters.grade;
 
     return matchesSearch && matchesStrand && matchesSection && matchesGrade;
   });
@@ -82,65 +139,67 @@ export default function StudentsPage() {
         </div>
         <button
           onClick={() => router.push('/admin/students/add')}
-          className="px-4 py-2 bg-[#002147] text-white rounded-lg hover:bg-[#002147]/90 flex items-center gap-2"
+          className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
         >
-          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
-          </svg>
           Add New Student
         </button>
       </div>
 
       {/* Filters */}
-      <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-6">
-        <div className="col-span-2">
-          <div className="relative">
+      <div className="bg-white rounded-lg shadow p-6 mb-6">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
+          <div className="md:col-span-1">
             <input
               type="text"
               placeholder="Search students..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#4FB3E8] focus:border-transparent"
+              className="w-full px-4 py-2 border rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             />
-            <svg
-              className="absolute left-3 top-2.5 w-5 h-5 text-gray-400"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
+          </div>
+          
+          <div>
+            <select
+              value={filters.grade}
+              onChange={handleGradeChange}
+              className="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
             >
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-            </svg>
+              <option value="All Grades">All Grades</option>
+              {GRADES.map(grade => (
+                <option key={grade} value={grade}>Grade {grade}</option>
+              ))}
+            </select>
+          </div>
+          
+          <div>
+            <select
+              value={filters.strand}
+              onChange={handleStrandChange}
+              className="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+            >
+              <option value="All Strands">All Strands</option>
+              {STRANDS.map(strand => (
+                <option key={strand} value={strand}>{strand}</option>
+              ))}
+            </select>
+          </div>
+          
+          <div>
+            <select
+              value={filters.section}
+              onChange={handleSectionChange}
+              disabled={filters.strand === 'All Strands' || filters.grade === 'All Grades'}
+              className={`block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 ${
+                (filters.strand === 'All Strands' || filters.grade === 'All Grades') ? 'opacity-50 cursor-not-allowed' : ''
+              }`}
+            >
+              <option value="All Sections">All Sections</option>
+              {availableSections.map(section => (
+                <option key={section} value={section}>{section}</option>
+              ))}
+            </select>
           </div>
         </div>
-        <select
-          value={filterStrand}
-          onChange={(e) => setFilterStrand(e.target.value)}
-          className="border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-[#4FB3E8] focus:border-transparent"
-        >
-          <option value="">All Strands</option>
-          {STRANDS.map(strand => (
-            <option key={strand} value={strand}>{strand}</option>
-          ))}
-        </select>
-        <select
-          value={filterSection}
-          onChange={(e) => setFilterSection(e.target.value)}
-          className="border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-[#4FB3E8] focus:border-transparent"
-        >
-          <option value="">All Sections</option>
-          {SECTIONS.map(section => (
-            <option key={section} value={section}>{section}</option>
-          ))}
-        </select>
-        <select
-          value={filterGrade}
-          onChange={(e) => setFilterGrade(e.target.value)}
-          className="border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-[#4FB3E8] focus:border-transparent"
-        >
-          <option value="">All Grades</option>
-          <option value="11">Grade 11</option>
-          <option value="12">Grade 12</option>
-        </select>
       </div>
 
       {/* Students Table */}

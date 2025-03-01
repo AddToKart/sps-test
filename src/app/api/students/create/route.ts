@@ -1,50 +1,37 @@
 import { NextResponse } from 'next/server';
-import admin from 'firebase-admin';
-import { getAuth } from 'firebase-admin/auth';
-import { getFirestore } from 'firebase-admin/firestore';
+import { adminAuth, adminDb } from '@/lib/firebase/admin';
 
 export async function POST(request: Request) {
   try {
-    const { email, password, name } = await request.json();
-
-    // Validate email domain
-    if (!email.endsWith('@student.com')) {
-      return NextResponse.json(
-        { error: 'Email must end with @student.com' },
-        { status: 400 }
-      );
-    }
-
-    const auth = getAuth();
-    const db = getFirestore();
-
-    // Create user in Firebase Auth
-    const userRecord = await auth.createUser({
-      email,
-      password,
-      displayName: name,
+    const data = await request.json();
+    
+    // Create user with admin SDK
+    const userRecord = await adminAuth.createUser({
+      email: data.email,
+      password: data.password,
+      displayName: data.fullName,
     });
 
-    // Create student document in Firestore
-    await db.collection('students').add({
+    // Prepare the student document data
+    const { password, ...studentData } = data;
+    
+    // Create student document
+    await adminDb.collection('students').doc(data.studentId).set({
+      ...studentData,
       uid: userRecord.uid,
-      email: email,
-      name: name,
-      section: 'Unassigned',
-      strand: 'Unassigned',
-      grade: 'Unassigned',
-      createdAt: admin.firestore.Timestamp.now()
+      status: 'active',
+      createdAt: new Date().toISOString()
     });
 
-    return NextResponse.json({
-      success: true,
-      message: 'Student created successfully',
-      uid: userRecord.uid
+    return NextResponse.json({ 
+      success: true, 
+      studentId: data.studentId,
+      uid: userRecord.uid 
     });
   } catch (error: any) {
-    console.error('Error creating student:', error);
+    console.error('Error in POST /api/students/create:', error);
     return NextResponse.json(
-      { error: error.message || 'Failed to create student' },
+      { error: error.message }, 
       { status: 500 }
     );
   }

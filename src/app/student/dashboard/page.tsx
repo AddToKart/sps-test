@@ -2,13 +2,12 @@
 
 import { useAuth } from '@/contexts/AuthContext';
 import { auth, db } from '@/lib/firebase/config';
-import { collection, query, where, getDocs, onSnapshot, doc, updateDoc, Timestamp, orderBy, limit } from 'firebase/firestore';
+import { collection, query, where, getDocs, onSnapshot, doc, updateDoc, Timestamp, orderBy, limit, getDoc, addDoc } from 'firebase/firestore';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import type { Student, Balance } from '@/types/student';
 import dynamic from 'next/dynamic';
 import { pdf } from '@react-pdf/renderer';
-import { ReceiptDocument } from '@/components/PaymentReceipt';
 import { onAuthStateChanged } from 'firebase/auth';
 import { Line } from 'react-chartjs-2';
 import {
@@ -26,6 +25,8 @@ import PaymentModal from '@/components/student/PaymentModal';
 import { PaymentService } from '@/services/PaymentService';
 import { Notification } from '@/types/notification';
 import { BellIcon } from '@heroicons/react/24/outline';
+import { ActivityService } from '@/services/ActivityService';
+import ReceiptDocument from '@/components/student/ReceiptDocument';
 
 ChartJS.register(
   CategoryScale,
@@ -62,7 +63,7 @@ const PAYMENT_METHODS: PaymentMethod[] = [
   { id: 'bpi', name: 'BPI Online', icon: '🏦' },
   { id: 'bdo', name: 'BDO Online', icon: '🏦' },
   { id: 'unionbank', name: 'UnionBank', icon: '🏦' },
-  { id: 'grabpay', name: 'GrabPay', icon: '💳' },
+  { id: 'grabpay', name: 'GrabPay', icon: '📱' },
 ];
 
 const generateReferenceNumber = (studentId: string) => {
@@ -104,6 +105,52 @@ interface PaymentHistory {
   dueDate: any;
 }
 
+// Add the getDaysUntilDue function to calculate days until due date
+const getDaysUntilDue = (dueDate: any) => {
+  if (!dueDate) {
+    return { days: 0, status: 'upcoming' };
+  }
+  
+  try {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    
+    const dueDateObj = dueDate.toDate ? dueDate.toDate() : new Date(dueDate);
+    dueDateObj.setHours(0, 0, 0, 0);
+    
+    const diffTime = dueDateObj.getTime() - today.getTime();
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    
+    if (diffDays < 0) {
+      return { days: Math.abs(diffDays), status: 'overdue' };
+    } else if (diffDays <= 3) {
+      return { days: diffDays, status: 'due-soon' };
+    } else {
+      return { days: diffDays, status: 'upcoming' };
+    }
+  } catch (error) {
+    console.error('Error calculating days until due:', error);
+    return { days: 0, status: 'upcoming' };
+  }
+};
+
+// Add the formatDate function to format dates consistently
+const formatDate = (date: any) => {
+  if (!date) return 'No due date';
+  
+  try {
+    const dateObj = date.toDate ? date.toDate() : new Date(date);
+    return dateObj.toLocaleDateString('en-US', {
+      month: 'long',
+      day: 'numeric',
+      year: 'numeric'
+    });
+  } catch (error) {
+    console.error('Error formatting date:', error);
+    return 'Invalid date';
+  }
+};
+
 export default function StudentDashboard() {
   const { user } = useAuth();
   const router = useRouter();
@@ -132,6 +179,7 @@ export default function StudentDashboard() {
   const [showNotifications, setShowNotifications] = useState(false);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
+  const [processingPayment, setProcessingPayment] = useState(false);
 
   useEffect(() => {
     console.log('Dashboard mounted');
@@ -307,7 +355,7 @@ export default function StudentDashboard() {
     
     // If only one balance is selected, use the existing payment flow
     if (selectedBalances.length === 1) {
-      handleMakePayment(selectedBalances[0]);
+      handlePayNow(selectedBalances[0]);
       return;
     }
     
@@ -394,466 +442,17 @@ export default function StudentDashboard() {
     }
   };
 
-  const handleMakePayment = (balance: Balance) => {
+  const handlePayNow = (balance: Balance) => {
+    // Set the selected balance and open the payment modal
     setSelectedBalance(balance);
     setIsPaymentModalOpen(true);
-  };
-
-  // Add handler for balance selection
-  const handleBalanceSelect = (balance: Balance) => {
-    // Implement the logic for selecting a balance
-  };
-
-  const handlePayment = async () => {
-    try {
-      if (!selectedPaymentMethod) {
-        toast.error('Please select a payment method');
-        return;
-      }
-
-      if (!nextPayment) {
-        toast.error('No payment to process');
-        return;
-      }
-
-      if (!studentInfo) {
-        toast.error('Student information not found');
-        return;
-      }
-
-      // Show loading toast
-      const loadingToast = toast.loading('Processing payment...');
-
-      // Create payment data
-      const paymentData = {
-        studentId: studentInfo.id,
-        studentEmail: user?.email || '',
-        amount: paymentMode === 'custom' ? Number(customAmount) : nextPayment.amount,
-        balanceId: nextPayment.id,
-        paymentMethod: selectedPaymentMethod
-      };
-
-      // Close payment modal first
-      handleClose();
-
-      try {
-        // Process payment using PaymentService
-        const result = await PaymentService.processPayment(paymentData);
-        
-        // Dismiss loading toast
-        toast.dismiss(loadingToast);
-        
-        // Show success toast
-        toast.success('Payment processed successfully');
-        
-        // Set last payment for receipt
-        setLastPayment({
-          ...result,
-          balanceType: nextPayment.type,
-          createdAt: result.createdAt,
-          paidAt: result.paidAt
-        });
-        
-        // Show receipt
-        setShowReceipt(true);
-      } catch (error) {
-        // Dismiss loading toast
-        toast.dismiss(loadingToast);
-        
-        console.error('Payment processing error:', error);
-        toast.error('Failed to process payment. Please try again.');
-      }
-    } catch (error) {
-      console.error('Payment error:', error);
-      toast.error('Failed to process payment');
-    }
-  };
-
-  const handleClose = () => {
-    setIsPaymentModalOpen(false);
-    setSelectedPaymentMethod('');
-    setPaymentMode('selected');
-    setCustomAmount('');
-  };
-
-  // Update the PaymentModal component to handle multiple balances
-  const PaymentModal = () => {
-    if (!isPaymentModalOpen) return null;
-
-    const isMultiplePayment = selectedBalance?.isMultiplePayment;
-
-    return (
-      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-        <div className="bg-white rounded-lg max-w-md w-full p-6">
-          {loading ? (
-            <div className="text-center py-8">
-              <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-[#4FB3E8] mx-auto mb-4"></div>
-              <h3 className="text-lg font-semibold mb-2">Loading...</h3>
-              <p className="text-gray-500">Please wait while we load your data...</p>
-            </div>
-          ) : (
-            <>
-              <div className="flex justify-between items-center mb-4">
-                <h3 className="text-lg font-semibold">Payment Details</h3>
-                <button 
-                  onClick={handleClose}
-                  className="text-gray-500 hover:text-gray-700"
-                >
-                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-              </div>
-              
-              {/* Payment Mode Selection - Only show for single payments */}
-              {!isMultiplePayment && (
-                <div className="mb-4">
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => setPaymentMode('selected')}
-                      className={`flex-1 py-2 px-4 rounded-md ${
-                        paymentMode === 'selected' ? 'bg-[#4FB3E8] text-white' : 'bg-gray-100 text-gray-700'
-                      }`}
-                    >
-                      Pay Selected
-                    </button>
-                    <button
-                      onClick={() => setPaymentMode('custom')}
-                      className={`flex-1 py-2 px-4 rounded-md ${
-                        paymentMode === 'custom' ? 'bg-[#4FB3E8] text-white' : 'bg-gray-100 text-gray-700'
-                      }`}
-                    >
-                      Custom Amount
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {/* Multiple Payments Summary */}
-              {isMultiplePayment && (
-                <div className="mb-4 p-4 bg-gray-50 rounded-lg">
-                  <h4 className="font-medium text-gray-900 mb-2">Payment Summary</h4>
-                  <div className="max-h-40 overflow-y-auto mb-3">
-                    {selectedBalances.map((balance) => (
-                      <div key={balance.id} className="flex justify-between py-1 border-b border-gray-100">
-                        <span className="text-sm text-gray-600">{balance.type}</span>
-                        <span className="text-sm font-medium">₱{formatCurrency(balance.amount)}</span>
-                      </div>
-                    ))}
-                  </div>
-                  <div className="flex justify-between pt-2 font-medium">
-                    <span>Total Amount</span>
-                    <span>₱{formatCurrency(totalSelectedAmount)}</span>
-                  </div>
-                </div>
-              )}
-
-              {/* Single Payment Balance Information */}
-              {!isMultiplePayment && selectedBalance && (
-                <div className="mb-4 p-4 bg-gray-50 rounded-lg">
-                  <div className="flex justify-between mb-2">
-                    <span className="text-gray-600">Payment Type:</span>
-                    <span className="font-medium">{selectedBalance.type}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-gray-600">Due Date:</span>
-                    <span className="font-medium">
-                      {selectedBalance.dueDate?.toDate().toLocaleDateString('en-US', {
-                        month: 'long',
-                        day: 'numeric',
-                        year: 'numeric'
-                      })}
-                    </span>
-                  </div>
-                </div>
-              )}
-
-              {/* Payment Amount Display */}
-              <div className="mb-4">
-                <p className="text-sm text-gray-600">Amount to Pay:</p>
-                <p className="text-2xl font-bold">
-                  ₱{formatCurrency(
-                    isMultiplePayment 
-                      ? totalSelectedAmount 
-                      : (paymentMode === 'custom' ? Number(customAmount) : (selectedBalance?.amount || 0))
-                  )}
-                </p>
-              </div>
-
-              {/* Custom Amount Input (if custom mode and not multiple payment) */}
-              {paymentMode === 'custom' && !isMultiplePayment && (
-                <div className="mb-4">
-                  <label className="block text-sm font-medium text-gray-700">Enter Amount</label>
-                  <input
-                    type="number"
-                    value={customAmount}
-                    onChange={(e) => setCustomAmount(e.target.value)}
-                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-[#4FB3E8] focus:ring-[#4FB3E8]"
-                    placeholder="Enter amount"
-                    required
-                  />
-                </div>
-              )}
-
-              {/* Payment Method Selection */}
-              <div className="grid grid-cols-2 gap-2 mb-4">
-                {PAYMENT_METHODS.map(method => (
-                  <button
-                    key={method.id}
-                    onClick={() => setSelectedPaymentMethod(method.id)}
-                    className={`p-2 border rounded-md flex items-center justify-center ${
-                      selectedPaymentMethod === method.id ? 'border-[#4FB3E8] bg-[#4FB3E8]/10' : 'border-gray-200'
-                    }`}
-                  >
-                    <span className="mr-2">{method.icon}</span>
-                    {method.name}
-                  </button>
-                ))}
-              </div>
-
-              {/* Action Buttons */}
-              <div className="flex justify-end space-x-3">
-                <button
-                  onClick={handleClose}
-                  className="px-4 py-2 text-gray-600 hover:text-gray-800"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={isMultiplePayment ? handleMultiPayment : handlePayment}
-                  disabled={!selectedPaymentMethod || (!isMultiplePayment && paymentMode === 'custom' && (!customAmount || Number(customAmount) <= 0))}
-                  className={`px-4 py-2 bg-[#4FB3E8] text-white rounded-md hover:bg-[#4FB3E8]/90 ${
-                    !selectedPaymentMethod || (!isMultiplePayment && paymentMode === 'custom' && (!customAmount || Number(customAmount) <= 0)) ? 'opacity-50 cursor-not-allowed' : ''
-                  }`}
-                >
-                  Pay Now
-                </button>
-              </div>
-            </>
-          )}
-        </div>
-      </div>
-    );
-  };
-
-  // Add handler for multiple payments
-  const handleMultiPayment = async () => {
-    try {
-      if (!selectedPaymentMethod) {
-        toast.error('Please select a payment method');
-        return;
-      }
-
-      if (selectedBalances.length === 0) {
-        toast.error('No balances selected for payment');
-        return;
-      }
-
-      if (!studentInfo) {
-        toast.error('Student information not found');
-        return;
-      }
-
-      // Show loading toast
-      const loadingToast = toast.loading('Processing multiple payments...');
-
-      // Close payment modal first
-      handleClose();
-
-      try {
-        // Process multiple payments using the batch method
-        const paymentsData = {
-          balances: selectedBalances,
-          studentId: studentInfo.id,
-          studentEmail: user?.email || '',
-          paymentMethod: selectedPaymentMethod
-        };
-        
-        const result = await PaymentService.processMultiplePayments(paymentsData);
-        
-        // Dismiss loading toast
-        toast.dismiss(loadingToast);
-        
-        // Show success toast
-        toast.success(`Successfully processed ${selectedBalances.length} payments`);
-        
-        // Set last payment for receipt
-        setLastPayment({
-          ...result,
-          selectedBalances: selectedBalances
-        });
-        
-        // Show receipt
-        setShowReceipt(true);
-        
-        // Clear selected balances
-        clearSelectedBalances();
-      } catch (error) {
-        // Dismiss loading toast
-        toast.dismiss(loadingToast);
-        
-        console.error('Payment processing error:', error);
-        toast.error('Failed to process payments. Please try again.');
-      }
-    } catch (error) {
-      console.error('Payment error:', error);
-      toast.error('Failed to process payments');
-    }
-  };
-
-  // Update the ReceiptModal component to handle multiple payments
-  const ReceiptModal = ({ payment, onClose }: { payment: any; onClose: () => void }) => {
-    if (!payment || !user?.email) return null;
-
-    const isMultiplePayment = payment.isMultiplePayment || payment.selectedBalances;
-
-    const handleDownloadPDF = async () => {
-      try {
-        // Show loading state
-        const button = document.querySelector('#downloadPdfBtn') as HTMLButtonElement;
-        if (button) {
-          button.textContent = 'Generating PDF...';
-          button.disabled = true;
-        }
-
-        // Create receipt data with the correct structure
-        const receiptData = isMultiplePayment 
-          ? {
-              studentName: studentInfo?.fullName || '',
-              studentEmail: user.email,
-              isMultiplePayment: true,
-              totalAmount: payment.amount,
-              balances: payment.selectedBalances || [],
-              paymentMethod: payment.paymentMethod,
-              referenceNumber: payment.referenceNumber,
-              paidAt: payment.paidAt
-            }
-          : {
-              studentName: studentInfo?.fullName || '',
-              studentEmail: user.email,
-              balance: {
-                amount: payment.amount,
-                type: payment.balanceType || payment.type || 'Payment',
-                status: 'paid',
-                createdAt: payment.createdAt,
-                paidAt: payment.paidAt
-              },
-              paymentMethod: payment.paymentMethod,
-              referenceNumber: payment.referenceNumber
-            };
-
-        const blob = await pdf(
-          <ReceiptDocument {...receiptData} />
-        ).toBlob();
-
-        // Force download using Blob and download attribute
-        const fileName = `receipt-${isMultiplePayment ? 'multiple' : (payment.balanceType || payment.type || 'payment')}-${new Date().toISOString().split('T')[0]}.pdf`;
-        
-        // Create Blob URL with specific MIME type
-        const blobUrl = window.URL.createObjectURL(
-          new Blob([blob], { type: 'application/pdf' })
-        );
-
-        // Create temporary link and trigger download
-        const tempLink = document.createElement('a');
-        tempLink.style.display = 'none';
-        tempLink.href = blobUrl;
-        tempLink.setAttribute('download', fileName);
-        
-        document.body.appendChild(tempLink);
-        tempLink.click();
-        
-        // Cleanup
-        setTimeout(() => {
-          document.body.removeChild(tempLink);
-          window.URL.revokeObjectURL(blobUrl);
-        }, 100);
-
-        // Reset button state
-        if (button) {
-          button.textContent = 'Download PDF';
-          button.disabled = false;
-        }
-      } catch (error) {
-        console.error('Error generating PDF:', error);
-        toast.error('Failed to generate PDF. Please try again.');
-      }
-    };
-
-    return (
-      <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
-        <div className="relative top-20 mx-auto p-5 border w-11/12 max-w-4xl shadow-lg rounded-md bg-white">
-          <div className="mb-4 flex justify-between items-center">
-            <h3 className="text-lg font-medium leading-6 text-gray-900">
-              {isMultiplePayment ? 'Multiple Payments Receipt' : 'Payment Receipt'}
-            </h3>
-            <div className="flex items-center gap-4">
-              <button
-                id="downloadPdfBtn"
-                onClick={handleDownloadPDF}
-                className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 transition-colors text-sm"
-              >
-                Download PDF
-              </button>
-              <button
-                onClick={onClose}
-                className="text-gray-500 hover:text-gray-700"
-              >
-                <span className="sr-only">Close</span>
-                <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-          </div>
-          <div className="overflow-y-auto max-h-[80vh]">
-            <PaymentReceipt
-              studentName={studentInfo?.fullName || ''}
-              studentEmail={user.email}
-              isMultiplePayment={isMultiplePayment}
-              balance={isMultiplePayment ? undefined : {
-                amount: payment.amount,
-                type: payment.balanceType || payment.type || 'Payment',
-                status: 'paid',
-                createdAt: payment.createdAt,
-                paidAt: payment.paidAt
-              }}
-              balances={isMultiplePayment ? payment.selectedBalances : undefined}
-              totalAmount={isMultiplePayment ? payment.amount : undefined}
-              paymentMethod={payment.paymentMethod}
-              referenceNumber={payment.referenceNumber}
-            />
-          </div>
-        </div>
-      </div>
-    );
-  };
-
-  const formatDate = (date: any) => {
-    if (!date) return 'N/A';
-    try {
-      if (date instanceof Timestamp) {
-        return date.toDate().toLocaleDateString('en-US', {
-          month: 'long',
-          day: 'numeric',
-          year: 'numeric'
-        });
-      }
-      return new Date(date).toLocaleDateString('en-US', {
-        month: 'long',
-        day: 'numeric',
-        year: 'numeric'
-      });
-    } catch (error) {
-      return 'N/A';
-    }
   };
 
   // Add a function to open a payment selection modal
   const handleOpenPaymentSelection = () => {
     // If there's only one pending balance, just pay that directly
     if (pendingBalances.length === 1) {
-      handleMakePayment(pendingBalances[0]);
+      handlePayNow(pendingBalances[0]);
       return;
     }
     
@@ -874,50 +473,6 @@ export default function StudentDashboard() {
       setIsPaymentModalOpen(true);
     } else {
       toast.error('No pending balances to pay');
-    }
-  };
-
-  // Update the handlePayNow function to handle the case when nextPayment might not be a Balance
-  const handlePayNow = () => {
-    if (!nextPayment) {
-      toast.error('No payment due');
-      return;
-    }
-    
-    // Find the corresponding balance object
-    const balance = pendingBalances.find(b => b.id === nextPayment.id);
-    if (balance) {
-      handleMakePayment(balance);
-    } else {
-      toast.error('Balance details not found');
-    }
-  };
-
-  // Add a helper function to calculate days until due
-  const getDaysUntilDue = (dueDate: any): { days: number; status: 'overdue' | 'due-soon' | 'upcoming' } => {
-    if (!dueDate) return { days: 0, status: 'upcoming' };
-    
-    try {
-      const dueDateObj = dueDate instanceof Timestamp ? dueDate.toDate() : new Date(dueDate);
-      const today = new Date();
-      
-      // Reset time part for accurate day calculation
-      today.setHours(0, 0, 0, 0);
-      dueDateObj.setHours(0, 0, 0, 0);
-      
-      const diffTime = dueDateObj.getTime() - today.getTime();
-      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-      
-      if (diffDays < 0) {
-        return { days: Math.abs(diffDays), status: 'overdue' };
-      } else if (diffDays <= 7) {
-        return { days: diffDays, status: 'due-soon' };
-      } else {
-        return { days: diffDays, status: 'upcoming' };
-      }
-    } catch (error) {
-      console.error('Error calculating days until due:', error);
-      return { days: 0, status: 'upcoming' };
     }
   };
 
@@ -1013,6 +568,372 @@ export default function StudentDashboard() {
   const handleViewReceipt = (payment: PaymentHistory) => {
     setLastPayment(payment);
     setShowReceipt(true);
+  };
+
+  // Add the fetchBalances function
+  const fetchBalances = async () => {
+    try {
+      if (!user) return;
+      
+      console.log('Fetching balances for user:', user.uid);
+      
+      // Get all balances for the current student
+      const balancesRef = collection(db, 'balances');
+      const q = query(
+        balancesRef,
+        where('studentId', '==', user.uid),
+        orderBy('createdAt', 'desc')
+      );
+      
+      const querySnapshot = await getDocs(q);
+      
+      const balancesData = querySnapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      })) as Balance[];
+      
+      console.log('Fetched balances:', balancesData.length);
+      
+      // Filter balances by status
+      const pending = balancesData.filter(balance => balance.status === 'pending');
+      const completed = balancesData.filter(balance => balance.status === 'paid');
+      const overdue = pending.filter(balance => {
+        if (!balance.dueDate) return false;
+        const dueDate = balance.dueDate.toDate();
+        return dueDate < new Date();
+      });
+      
+      // Set pending balances
+      setPendingBalances(pending);
+      
+      // Calculate total balance
+      const total = pending.reduce((sum, balance) => sum + balance.amount, 0);
+      setTotalBalance(total);
+      
+      // Set payment stats
+      setPaymentStats({
+        completed: completed.length,
+        pending: pending.length,
+        overdue: overdue.length
+      });
+      
+      // Set next payment (the one with the earliest due date)
+      const sortedByDueDate = [...pending].sort((a, b) => {
+        if (!a.dueDate) return 1;
+        if (!b.dueDate) return -1;
+        return a.dueDate.toDate().getTime() - b.dueDate.toDate().getTime();
+      });
+      
+      setNextPayment(sortedByDueDate[0] || null);
+      
+      // Set recent payments
+      const recentPaid = completed.slice(0, 5);
+      setRecentPayments(recentPaid);
+      
+      // Set upcoming payments (due in the next 7 days)
+      const now = new Date();
+      const nextWeek = new Date();
+      nextWeek.setDate(now.getDate() + 7);
+      
+      const upcoming = pending.filter(balance => {
+        if (!balance.dueDate) return false;
+        const dueDate = balance.dueDate.toDate();
+        return dueDate >= now && dueDate <= nextWeek;
+      });
+      
+      setUpcomingPayments(upcoming);
+      
+      setIsLoading(false);
+    } catch (error) {
+      console.error('Error fetching balances:', error);
+      toast.error('Failed to load payment data');
+      setIsLoading(false);
+    }
+  };
+
+  // Fix the handlePayment function to properly handle string IDs
+  const handlePayment = async (balanceId: string) => {
+    try {
+      if (!balanceId || typeof balanceId !== 'string') {
+        console.error('Invalid balance ID:', balanceId);
+        toast.error('Invalid balance data');
+        return;
+      }
+      
+      setProcessingPayment(true);
+      
+      // Generate a unique reference number with proper string format
+      const referenceNumber = `PAY-${Date.now().toString()}-${Math.floor(Math.random() * 10000).toString()}`;
+      
+      // Get the balance details
+      const balanceRef = doc(db, 'balances', balanceId);
+      const balanceDoc = await getDoc(balanceRef);
+      
+      if (!balanceDoc.exists()) {
+        toast.error('Balance not found');
+        return;
+      }
+      
+      const balance = { id: balanceDoc.id, ...balanceDoc.data() };
+      
+      // Update the balance status
+      await updateDoc(balanceRef, {
+        status: 'paid',
+        paidAt: Timestamp.now(),
+        paymentMethod: selectedPaymentMethod,
+        referenceNumber: referenceNumber
+      });
+      
+      // Create a payment record
+      const paymentRef = await addDoc(collection(db, 'payments'), {
+        balanceId: balanceId,
+        studentId: user?.uid,
+        amount: balance.amount,
+        paymentMethod: selectedPaymentMethod,
+        referenceNumber: referenceNumber,
+        status: 'completed',
+        type: balance.type,
+        createdAt: Timestamp.now(),
+        paidAt: Timestamp.now()
+      });
+      
+      // Log the activity with safe metadata
+      await ActivityService.logActivityWithSafeMetadata({
+        type: 'payment',
+        action: 'payment_completed',
+        description: `Payment of ₱${balance.amount.toLocaleString()} for ${balance.type} completed`,
+        userId: user?.uid || '',
+        userType: 'student',
+        metadata: {
+          paymentId: paymentRef.id,
+          balanceId: balanceId,
+          studentId: user?.uid || '',
+          studentEmail: user?.email || '',
+          amount: balance.amount || 0,
+          paymentMethod: selectedPaymentMethod,
+          referenceNumber: referenceNumber
+        }
+      });
+      
+      // Set the last payment for receipt
+      setLastPayment({
+        id: paymentRef.id,
+        amount: balance.amount,
+        type: balance.type,
+        paymentMethod: selectedPaymentMethod,
+        referenceNumber: referenceNumber,
+        createdAt: Timestamp.now(),
+        paidAt: Timestamp.now(),
+        status: 'completed'
+      });
+      
+      // Show receipt
+      setShowReceipt(true);
+      setIsPaymentModalOpen(false);
+      
+      toast.success('Payment successful!');
+      fetchBalances(); // Refresh balances
+    } catch (error) {
+      console.error('Error processing payment:', error);
+      toast.error('Failed to process payment. Please try again.');
+    } finally {
+      setProcessingPayment(false);
+    }
+  };
+
+  // Add the PaymentModal component
+  const PaymentModal = () => {
+    if (!selectedBalance) return null;
+    
+    return (
+      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div className="bg-white rounded-lg p-6 max-w-md w-full">
+          <div className="flex justify-between items-center mb-6">
+            <h2 className="text-xl font-semibold">Make Payment</h2>
+            <button 
+              onClick={() => setIsPaymentModalOpen(false)}
+              className="text-gray-500 hover:text-gray-700"
+            >
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+          
+          <div className="mb-6">
+            <h3 className="font-medium text-gray-900 mb-2">{selectedBalance.type}</h3>
+            <p className="text-3xl font-bold text-gray-900">₱{formatCurrency(selectedBalance.amount)}</p>
+            {selectedBalance.dueDate && (
+              <p className="text-sm text-gray-500 mt-1">
+                Due: {formatDate(selectedBalance.dueDate)}
+              </p>
+            )}
+          </div>
+          
+          <div className="mb-6">
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Select Payment Method
+            </label>
+            <div className="grid grid-cols-2 gap-3">
+              {PAYMENT_METHODS.map((method) => (
+                <div
+                  key={method.id}
+                  onClick={() => setSelectedPaymentMethod(method.id)}
+                  className={`border rounded-lg p-3 cursor-pointer transition-colors ${
+                    selectedPaymentMethod === method.id
+                      ? 'border-blue-500 bg-blue-50'
+                      : 'border-gray-200 hover:border-blue-200'
+                  }`}
+                >
+                  <div className="flex items-center">
+                    <span className="text-xl mr-2">{method.icon}</span>
+                    <span className="font-medium">{method.name}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+          
+          <div className="flex justify-end space-x-3">
+            <button
+              onClick={() => setIsPaymentModalOpen(false)}
+              className="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={() => {
+                if (!selectedPaymentMethod) {
+                  toast.error('Please select a payment method');
+                  return;
+                }
+                handlePayment(selectedBalance.id);
+              }}
+              disabled={processingPayment || !selectedPaymentMethod}
+              className={`px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
+                processingPayment || !selectedPaymentMethod ? 'opacity-50 cursor-not-allowed' : ''
+              }`}
+            >
+              {processingPayment ? 'Processing...' : 'Confirm Payment'}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // Update the generatePDFReceipt function to include student ID
+  const generatePDFReceipt = async (payment) => {
+    try {
+      console.log('Generating PDF receipt for payment:', payment);
+      
+      // Create the PDF document using the ReceiptDocument component
+      const blob = await pdf(
+        <ReceiptDocument
+          studentName={studentInfo?.fullName || ''}
+          studentEmail={user?.email || ''}
+          studentId={studentInfo?.studentId || ''}
+          balance={payment}
+          paymentMethod={payment.paymentMethod}
+          referenceNumber={payment.referenceNumber || `REF-${payment.id.substring(0, 8)}`}
+        />
+      ).toBlob();
+      
+      // Create a URL for the blob
+      const url = URL.createObjectURL(blob);
+      
+      // Create a link element and trigger a download
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `receipt-${payment.id}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      
+      toast.success('Receipt downloaded successfully');
+    } catch (error) {
+      console.error('Error generating PDF receipt:', error);
+      toast.error('Failed to generate receipt. Please try again.');
+    }
+  };
+
+  // Add the ReceiptModal component with enhanced details
+  const ReceiptModal = () => {
+    if (!lastPayment) return null;
+    
+    return (
+      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div className="bg-white rounded-lg p-6 max-w-md w-full">
+          <div className="flex justify-between items-center mb-6">
+            <h2 className="text-xl font-semibold">Payment Receipt</h2>
+            <button 
+              onClick={() => setShowReceipt(false)}
+              className="text-gray-500 hover:text-gray-700"
+            >
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+          
+          <div className="text-center mb-6">
+            <h3 className="text-lg font-medium text-gray-900">Payment Receipt</h3>
+            <p className="text-gray-600">Thank you for your payment</p>
+          </div>
+          
+          <div className="border-t border-b border-gray-200 py-4 mb-4">
+            <div className="flex justify-between mb-2">
+              <span className="text-gray-600">Student Name:</span>
+              <span className="font-medium">{studentInfo?.fullName}</span>
+            </div>
+            <div className="flex justify-between mb-2">
+              <span className="text-gray-600">Student ID:</span>
+              <span className="font-medium">{studentInfo?.studentId}</span>
+            </div>
+            <div className="flex justify-between mb-2">
+              <span className="text-gray-600">Reference Number:</span>
+              <span className="font-medium">{lastPayment.referenceNumber || `REF-${lastPayment.id.substring(0, 8)}`}</span>
+            </div>
+            <div className="flex justify-between mb-2">
+              <span className="text-gray-600">Amount:</span>
+              <span className="font-medium">₱{formatCurrency(lastPayment.amount)}</span>
+            </div>
+            <div className="flex justify-between mb-2">
+              <span className="text-gray-600">Payment Type:</span>
+              <span className="font-medium">{lastPayment.type}</span>
+            </div>
+            <div className="flex justify-between mb-2">
+              <span className="text-gray-600">Payment Method:</span>
+              <span className="font-medium">{lastPayment.paymentMethod}</span>
+            </div>
+            <div className="flex justify-between mb-2">
+              <span className="text-gray-600">Date:</span>
+              <span className="font-medium">{formatDate(lastPayment.createdAt)}</span>
+            </div>
+          </div>
+          
+          <div className="text-center text-green-600 mb-4">
+            <p className="font-medium">Payment Successful</p>
+            <p className="text-sm text-gray-500 mt-1">A copy of this receipt has been sent to your email.</p>
+          </div>
+          
+          <div className="flex justify-between">
+            <button
+              onClick={() => setShowReceipt(false)}
+              className="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50"
+            >
+              Close
+            </button>
+            <button
+              onClick={() => generatePDFReceipt(lastPayment)}
+              className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
+            >
+              Download PDF
+            </button>
+          </div>
+        </div>
+      </div>
+    );
   };
 
   if (loading) {
@@ -1166,7 +1087,7 @@ export default function StudentDashboard() {
           <div className="flex items-center justify-between mb-4">
             <div className="p-3 rounded-lg bg-red-50">
               <svg className="w-6 h-6 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-5 0a4 4 0 11-8 0 4 4 0 018 0z" />
               </svg>
             </div>
           </div>
@@ -1233,7 +1154,7 @@ export default function StudentDashboard() {
               )}
               
               <button
-                onClick={() => handleMakePayment(nextPayment as Balance)}
+                onClick={() => handlePayNow(nextPayment as Balance)}
                 className="w-full py-3 bg-[#002147] text-white rounded-lg hover:bg-[#002147]/90 transition-colors"
               >
                 Pay Now
@@ -1359,14 +1280,14 @@ export default function StudentDashboard() {
           <div className="flex gap-2">
             <button 
               onClick={clearSelectedBalances}
-              className="px-3 py-1 text-sm text-gray-600 hover:text-gray-800"
+              className="px-3 py-1 text-gray-600 hover:text-gray-800"
               disabled={selectedBalances.length === 0}
             >
               Clear Selection
             </button>
             <button 
               onClick={selectAllBalances}
-              className="px-3 py-1 text-sm text-gray-600 hover:text-gray-800"
+              className="px-3 py-1 text-gray-600 hover:text-gray-800"
               disabled={pendingBalances.length === 0 || pendingBalances.length === selectedBalances.length}
             >
               Select All
@@ -1450,7 +1371,7 @@ export default function StudentDashboard() {
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                         <button
-                          onClick={() => handleMakePayment(balance)}
+                          onClick={() => handlePayNow(balance)}
                           className="text-[#4FB3E8] hover:text-[#4FB3E8]/80"
                         >
                           Pay Now
@@ -1533,17 +1454,9 @@ export default function StudentDashboard() {
         </div>
       </div>
 
-      {/* Render the PaymentModal */}
-      {isPaymentModalOpen && selectedBalance && (
-        <PaymentModal />
-      )}
-      
-      {showReceipt && lastPayment && (
-        <ReceiptModal
-          payment={lastPayment}
-          onClose={() => setShowReceipt(false)}
-        />
-      )}
+      {/* Modals */}
+      {isPaymentModalOpen && selectedBalance && <PaymentModal />}
+      {showReceipt && lastPayment && <ReceiptModal />}
     </div>
   );
 } 

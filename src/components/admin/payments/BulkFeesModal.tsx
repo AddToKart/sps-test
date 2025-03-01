@@ -1,15 +1,20 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Dialog } from '@headlessui/react';
 import { db } from '@/lib/firebase/config';
 import { collection, getDocs, addDoc, query, where, Timestamp } from 'firebase/firestore';
 import toast from 'react-hot-toast';
+import { useAuth } from '@/contexts/AuthContext';
+import { ActivityService } from '@/services/ActivityService';
 
 interface BulkFeesModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSuccess?: () => void;
+  onSuccess: () => void;
+  strands: string[];
+  grades: string[];
+  strandSections: Record<string, Record<string, string[]>>;
 }
 
 const GRADES = ['11', '12'];
@@ -24,7 +29,15 @@ const FEE_TYPES = [
   'Other Fees'
 ];
 
-export default function BulkFeesModal({ isOpen, onClose, onSuccess }: BulkFeesModalProps) {
+export default function BulkFeesModal({ 
+  isOpen, 
+  onClose, 
+  onSuccess,
+  strands,
+  grades,
+  strandSections
+}: BulkFeesModalProps) {
+  const { user } = useAuth();
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
     feeType: '',
@@ -35,6 +48,16 @@ export default function BulkFeesModal({ isOpen, onClose, onSuccess }: BulkFeesMo
     strand: 'All',
     section: 'All'
   });
+  const [availableSections, setAvailableSections] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (formData.yearLevel !== 'All' && formData.strand !== 'All') {
+      const sections = strandSections[formData.yearLevel]?.[formData.strand] || [];
+      setAvailableSections(sections);
+    } else {
+      setAvailableSections([]);
+    }
+  }, [formData.yearLevel, formData.strand, strandSections]);
 
   if (!isOpen) return null;
 
@@ -46,6 +69,7 @@ export default function BulkFeesModal({ isOpen, onClose, onSuccess }: BulkFeesMo
       // Validate form data
       if (!formData.feeType || !formData.amount || !formData.dueDate) {
         toast.error('Please fill in all required fields');
+        setLoading(false);
         return;
       }
 
@@ -53,6 +77,7 @@ export default function BulkFeesModal({ isOpen, onClose, onSuccess }: BulkFeesMo
       const dueDate = new Date(formData.dueDate);
       if (isNaN(dueDate.getTime())) {
         toast.error('Invalid due date');
+        setLoading(false);
         return;
       }
 
@@ -74,55 +99,65 @@ export default function BulkFeesModal({ isOpen, onClose, onSuccess }: BulkFeesMo
       
       if (studentsSnapshot.empty) {
         toast.error('No students found matching the selected criteria');
+        setLoading(false);
         return;
       }
 
       let successCount = 0;
-      
+      const balancesCollection = collection(db, 'balances');
+
       // Add fee to each student
       for (const studentDoc of studentsSnapshot.docs) {
-        const studentData = studentDoc.data();
-        try {
-          await addDoc(collection(db, 'balances'), {
-            studentId: studentDoc.id,
-            studentName: studentData.fullName,
-            studentEmail: studentData.email,
-            type: formData.feeType,
-            amount: parseFloat(formData.amount),
-            dueDate: Timestamp.fromDate(dueDate),
-            description: formData.description.trim(),
-            status: 'pending',
-            createdAt: Timestamp.now(),
-            dateAdded: Timestamp.now()
-          });
-          successCount++;
-        } catch (error) {
-          console.error(`Error adding fee to student ${studentDoc.id}:`, error);
-        }
-      }
-
-      // Show success message
-      if (successCount > 0) {
-        toast.success(`Successfully added fees to ${successCount} students`);
-        // Reset form
-        setFormData({
-          feeType: '',
-          amount: '',
-          dueDate: '',
-          description: '',
-          yearLevel: 'All',
-          strand: 'All',
-          section: 'All'
+        const student = studentDoc.data();
+        
+        await addDoc(balancesCollection, {
+          studentId: studentDoc.id,
+          studentName: student.fullName,
+          studentEmail: student.email,
+          type: formData.feeType,
+          amount: parseFloat(formData.amount),
+          description: formData.description || formData.feeType,
+          dueDate: Timestamp.fromDate(dueDate),
+          status: 'pending',
+          createdAt: Timestamp.now(),
+          createdBy: user?.uid || 'system'
         });
-        onSuccess?.();
-        onClose();
-      } else {
-        toast.error('Failed to add fees to any students');
+        
+        successCount++;
       }
 
+      // Log activity
+      await ActivityService.logActivity({
+        type: 'balance',
+        action: 'bulk_fees_added',
+        description: `Added ${formData.feeType} fees to ${successCount} students`,
+        userId: user?.uid || 'system',
+        userType: 'admin',
+        metadata: {
+          feeType: formData.feeType,
+          amount: formData.amount,
+          studentsAffected: successCount,
+          dueDate: dueDate.toISOString()
+        }
+      });
+
+      toast.success(`Successfully added fees to ${successCount} students`);
+      onSuccess();
+      
+      // Reset form
+      setFormData({
+        feeType: '',
+        amount: '',
+        dueDate: '',
+        description: '',
+        yearLevel: 'All',
+        strand: 'All',
+        section: 'All'
+      });
+      
     } catch (error) {
       console.error('Error adding bulk fees:', error);
-      toast.error('Failed to add fees. Please try again.');
+      toast.error('Failed to add fees');
     } finally {
       setLoading(false);
     }
@@ -189,11 +224,11 @@ export default function BulkFeesModal({ isOpen, onClose, onSuccess }: BulkFeesMo
                 <label className="block text-sm font-medium text-gray-700">Grade Level</label>
                 <select
                   value={formData.yearLevel}
-                  onChange={(e) => setFormData({ ...formData, yearLevel: e.target.value })}
+                  onChange={(e) => setFormData({ ...formData, yearLevel: e.target.value, section: 'All' })}
                   className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
                 >
                   <option value="All">All Grades</option>
-                  {GRADES.map(grade => (
+                  {grades.map(grade => (
                     <option key={grade} value={grade}>Grade {grade}</option>
                   ))}
                 </select>
@@ -203,11 +238,11 @@ export default function BulkFeesModal({ isOpen, onClose, onSuccess }: BulkFeesMo
                 <label className="block text-sm font-medium text-gray-700">Strand</label>
                 <select
                   value={formData.strand}
-                  onChange={(e) => setFormData({ ...formData, strand: e.target.value })}
+                  onChange={(e) => setFormData({ ...formData, strand: e.target.value, section: 'All' })}
                   className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
                 >
                   <option value="All">All Strands</option>
-                  {STRANDS.map(strand => (
+                  {strands.map(strand => (
                     <option key={strand} value={strand}>{strand}</option>
                   ))}
                 </select>
@@ -218,11 +253,14 @@ export default function BulkFeesModal({ isOpen, onClose, onSuccess }: BulkFeesMo
                 <select
                   value={formData.section}
                   onChange={(e) => setFormData({ ...formData, section: e.target.value })}
-                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                  className={`mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 ${
+                    (formData.yearLevel === 'All' || formData.strand === 'All') ? 'opacity-50 cursor-not-allowed' : ''
+                  }`}
+                  disabled={formData.yearLevel === 'All' || formData.strand === 'All'}
                 >
                   <option value="All">All Sections</option>
-                  {SECTIONS.map(section => (
-                    <option key={section} value={section}>Section {section}</option>
+                  {availableSections.map(section => (
+                    <option key={section} value={section}>{section}</option>
                   ))}
                 </select>
               </div>

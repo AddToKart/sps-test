@@ -150,29 +150,46 @@ interface PaymentReceiptProps {
 }
 
 // Create the receipt component for browser rendering
-export const PaymentReceipt: React.FC<PaymentReceiptProps> = ({
-  studentName,
-  studentEmail,
-  balance,
-  paymentMethod,
-  referenceNumber,
-  isMultiplePayment,
-  balances,
-  totalAmount
-}) => {
+export const PaymentReceipt = ({ payment }) => {
   return (
-    <PDFViewer style={{ width: '100%', height: 600 }}>
-      <ReceiptDocument
-        studentName={studentName}
-        studentEmail={studentEmail}
-        balance={balance}
-        paymentMethod={paymentMethod}
-        referenceNumber={referenceNumber}
-        isMultiplePayment={isMultiplePayment}
-        balances={balances}
-        totalAmount={totalAmount}
-      />
-    </PDFViewer>
+    <div className="bg-white p-6 rounded-lg shadow-md max-w-md mx-auto">
+      <div className="text-center mb-6">
+        <h2 className="text-2xl font-bold text-gray-800">Payment Receipt</h2>
+        <p className="text-gray-500">Thank you for your payment</p>
+      </div>
+      
+      <div className="border-t border-b border-gray-200 py-4 mb-4">
+        <div className="flex justify-between mb-2">
+          <span className="text-gray-600">Reference Number:</span>
+          <span className="font-medium">{payment?.referenceNumber || 'N/A'}</span>
+        </div>
+        <div className="flex justify-between mb-2">
+          <span className="text-gray-600">Amount:</span>
+          <span className="font-medium">₱{payment?.amount?.toLocaleString() || '0'}</span>
+        </div>
+        <div className="flex justify-between mb-2">
+          <span className="text-gray-600">Payment Type:</span>
+          <span className="font-medium">{payment?.type || 'Payment'}</span>
+        </div>
+        <div className="flex justify-between mb-2">
+          <span className="text-gray-600">Payment Method:</span>
+          <span className="font-medium">{payment?.paymentMethod || 'Online Payment'}</span>
+        </div>
+        <div className="flex justify-between">
+          <span className="text-gray-600">Date:</span>
+          <span className="font-medium">
+            {payment?.createdAt?.toDate 
+              ? payment.createdAt.toDate().toLocaleDateString() 
+              : new Date().toLocaleDateString()}
+          </span>
+        </div>
+      </div>
+      
+      <div className="text-center">
+        <p className="text-green-600 font-medium mb-2">Payment Successful</p>
+        <p className="text-sm text-gray-500">A copy of this receipt has been sent to your email.</p>
+      </div>
+    </div>
   );
 };
 

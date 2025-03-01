@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { db } from '@/lib/firebase/config';
-import { collection, getDocs, query, where, orderBy, limit, Timestamp } from 'firebase/firestore';
+import { collection, getDocs, query, where, orderBy, limit, Timestamp, addDoc, serverTimestamp } from 'firebase/firestore';
 import { useAuth } from '@/contexts/AuthContext';
 import { Line, Doughnut } from 'react-chartjs-2';
 import {
@@ -17,6 +17,11 @@ import {
   ArcElement,
 } from 'chart.js';
 import { useRouter } from 'next/navigation';
+import toast from 'react-hot-toast';
+import RecentActivity from '@/components/admin/RecentActivity';
+import { ActivityService } from '@/services/ActivityService';
+import { formatDistanceToNow } from 'date-fns';
+import { ArrowUpIcon, ArrowDownIcon } from '@heroicons/react/24/outline';
 
 // Register ChartJS components
 ChartJS.register(
@@ -53,16 +58,23 @@ const FEE_TYPES = [
   'Other Fees'
 ];
 
-// Add this new component at the top of the file
-const QuickAction = ({ icon, label, onClick, color = "blue" }) => (
+// Update the QuickAction component to accept and use loading state
+const QuickAction = ({ icon, label, onClick, color = "blue", isLoading = false }) => (
   <button
     onClick={onClick}
+    disabled={isLoading}
     className={`flex items-center p-3 rounded-lg bg-${color}-50 hover:bg-${color}-100 transition-colors w-full`}
   >
     <div className={`p-2 rounded-lg bg-${color}-100 mr-3`}>
-      {icon}
+      {isLoading ? (
+        <div className="w-5 h-5 border-2 border-t-transparent border-${color}-600 rounded-full animate-spin"></div>
+      ) : (
+        icon
+      )}
     </div>
-    <span className="text-sm font-medium text-gray-700">{label}</span>
+    <span className="text-sm font-medium text-gray-700">
+      {isLoading ? 'Processing...' : label}
+    </span>
   </button>
 );
 
@@ -81,6 +93,12 @@ export default function AdminDashboard() {
   });
 
   const [loading, setLoading] = useState(true);
+  // Add loading states for the quick action buttons
+  const [actionLoading, setActionLoading] = useState({
+    recordPayment: false,
+    generateReport: false, 
+    sendReminders: false
+  });
 
   // Add new state for charts
   const [paymentTrends, setPaymentTrends] = useState({
@@ -109,11 +127,10 @@ export default function AdminDashboard() {
 
   // Add new states for notifications and time
   const [currentTime, setCurrentTime] = useState(new Date());
-  const [notifications, setNotifications] = useState([
-    { id: 1, type: 'payment', message: 'New payment received from John Doe', time: '5m ago' },
-    { id: 2, type: 'balance', message: 'Outstanding balance reminder sent to 15 students', time: '1h ago' },
-    { id: 3, type: 'system', message: 'System maintenance scheduled for tonight', time: '2h ago' },
-  ]);
+  const [activities, setActivities] = useState<Activity[]>([]);
+
+  // Add this new state at the top with your other states
+  const [yearlyCollection, setYearlyCollection] = useState(0);
 
   useEffect(() => {
     if (!user || !user.email?.endsWith('@admin.com')) {
@@ -162,7 +179,7 @@ export default function AdminDashboard() {
 
         // Calculate collection rate
         const collectionRate = completedPayments > 0 
-          ? (completedPayments / (pendingPayments + completedPayments)) * 100 
+          ? (completedPayments / (completedPayments + pendingPayments)) * 100
           : 0;
 
         // Calculate time-based collections
@@ -193,6 +210,15 @@ export default function AdminDashboard() {
           )
           .reduce((sum, balance) => sum + (balance.amount || 0), 0);
 
+        // Calculate yearly collection
+        const startOfYear = new Date(new Date().getFullYear(), 0, 1); // January 1st of current year
+        const yearlyCollection = balancesData
+          .filter(balance => 
+            balance.status === 'paid' && 
+            balance.paidAt?.toDate() >= startOfYear
+          )
+          .reduce((sum, balance) => sum + (balance.amount || 0), 0);
+
         // Update all states
         setStats({
           totalStudents,
@@ -202,13 +228,14 @@ export default function AdminDashboard() {
           totalCollections,
           pendingPayments,
           completedPayments,
-          collectionRate
+          collectionRate: parseFloat(collectionRate.toFixed(2))
         });
 
         setStudents(studentsData);
         setTodayCollection(todayCollection);
         setWeeklyCollection(weeklyCollection);
         setMonthlyCollection(monthlyCollection);
+        setYearlyCollection(yearlyCollection);
 
         // Set recent payments
         const recentPayments = balancesData
@@ -288,7 +315,21 @@ export default function AdminDashboard() {
           }]
         });
 
+        // Set up activities subscription
+        console.log('Setting up activities subscription');
+        const unsubscribeActivities = ActivityService.subscribeToActivities((newActivities) => {
+          console.log('Received new activities:', newActivities);
+          setActivities(newActivities);
+        }, 4); // Limit to 4 activities
+
         setLoading(false);
+        
+        // Clean up subscription when component unmounts
+        return () => {
+          console.log('Cleaning up activities subscription');
+          unsubscribeActivities();
+        };
+
       } catch (error) {
         console.error('Error in fetchData:', error);
         setLoading(false);
@@ -303,6 +344,84 @@ export default function AdminDashboard() {
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
     return () => clearInterval(timer);
   }, []);
+
+  // Add handlers for the quick action buttons
+  const handleRecordPayment = () => {
+    setActionLoading(prev => ({ ...prev, recordPayment: true }));
+    try {
+      router.push('/admin/students');
+    } catch (error) {
+      console.error('Navigation error:', error);
+      toast.error('Failed to navigate to students page');
+    } finally {
+      setActionLoading(prev => ({ ...prev, recordPayment: false }));
+    }
+  };
+
+  const handleGenerateReport = () => {
+    setActionLoading(prev => ({ ...prev, generateReport: true }));
+    try {
+      router.push('/admin/reports');
+    } catch (error) {
+      console.error('Navigation error:', error);
+      toast.error('Failed to navigate to reports page');
+    } finally {
+      setActionLoading(prev => ({ ...prev, generateReport: false }));
+    }
+  };
+
+  const handleSendReminders = async () => {
+    try {
+      setActionLoading(prev => ({ ...prev, sendReminders: true }));
+      
+      // Get students with pending balances
+      const balancesRef = collection(db, 'balances');
+      const pendingBalancesQuery = query(balancesRef, where('status', '==', 'pending'));
+      const pendingBalancesSnapshot = await getDocs(pendingBalancesQuery);
+      
+      // Group by student
+      const studentBalances = new Map();
+      pendingBalancesSnapshot.docs.forEach(doc => {
+        const balance = { ...doc.data(), id: doc.id };
+        if (!studentBalances.has(balance.studentId)) {
+          studentBalances.set(balance.studentId, []);
+        }
+        studentBalances.get(balance.studentId).push(balance);
+      });
+
+      // Send reminders
+      const studentsNotified = studentBalances.size;
+      
+      if (studentsNotified > 0) {
+        // Use ActivityService to log the activity instead of direct addDoc
+        await ActivityService.logActivity({
+          type: 'notification',
+          action: 'payment_reminder',
+          description: `Payment reminders sent to ${studentsNotified} students`,
+          userId: user?.uid || 'unknown',
+          userType: 'admin',
+          metadata: {
+            studentsCount: studentsNotified,
+            totalBalances: pendingBalancesSnapshot.size,
+            timestamp: new Date().toISOString(),
+            totalAmount: Array.from(studentBalances.values())
+              .flat()
+              .reduce((sum, balance) => sum + (balance.amount || 0), 0)
+          }
+        });
+
+        toast.success(`Reminders sent to ${studentsNotified} students`);
+      } else {
+        toast.info('No pending balances to send reminders for');
+      }
+
+    } catch (error) {
+      console.error('Error sending reminders:', error);
+      toast.error('Failed to send reminders');
+    } finally {
+      setActionLoading(prev => ({ ...prev, sendReminders: false }));
+    }
+  };
 
   if (loading) {
     return (
@@ -331,57 +450,7 @@ export default function AdminDashboard() {
             </div>
             <p className="text-gray-600">Welcome back, {user?.email?.split('@')[0]}</p>
           </div>
-          
-          {/* Notification Bell */}
-          <div className="relative">
-            <button className="p-2 bg-white rounded-lg shadow-sm hover:bg-gray-50">
-              <div className="relative">
-                <svg className="w-6 h-6 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
-                </svg>
-                <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs w-4 h-4 rounded-full flex items-center justify-center">
-                  3
-                </span>
-              </div>
-            </button>
-          </div>
         </div>
-      </div>
-
-      {/* Quick Actions Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
-        <QuickAction
-          icon={<svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
-          </svg>}
-          label="Add New Student"
-          onClick={() => router.push('/admin/students/add')}
-          color="blue"
-        />
-        <QuickAction
-          icon={<svg className="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3-.895 3-2-1.343-2-3-2z" />
-          </svg>}
-          label="Record Payment"
-          onClick={() => {/* Add payment modal logic */}}
-          color="green"
-        />
-        <QuickAction
-          icon={<svg className="w-5 h-5 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-          </svg>}
-          label="Generate Report"
-          onClick={() => {/* Add report generation logic */}}
-          color="purple"
-        />
-        <QuickAction
-          icon={<svg className="w-5 h-5 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
-          </svg>}
-          label="Send Reminders"
-          onClick={() => {/* Add reminder logic */}}
-          color="yellow"
-        />
       </div>
 
       {/* Stats Cards Grid */}
@@ -461,13 +530,23 @@ export default function AdminDashboard() {
             <span className="text-xs font-medium text-gray-500">Collection Rate</span>
           </div>
           <div className="flex items-center justify-between">
-            <h3 className="text-2xl font-bold text-gray-900">{stats.collectionRate}%</h3>
-            <span className="text-sm text-green-500 flex items-center gap-1">
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
-              </svg>
-              +3.1%
-            </span>
+            <div className="flex items-center">
+              <h2 className="text-3xl font-bold">
+                {stats.collectionRate.toFixed(2)}%
+              </h2>
+              <span className={`ml-2 text-sm font-medium ${
+                stats.collectionRate >= 0 ? 'text-green-600' : 'text-red-600'
+              }`}>
+                <span className="flex items-center">
+                  {stats.collectionRate >= 0 ? (
+                    <ArrowUpIcon className="w-4 h-4 mr-1" />
+                  ) : (
+                    <ArrowDownIcon className="w-4 h-4 mr-1" />
+                  )}
+                  {Math.abs(stats.collectionRate).toFixed(1)}%
+                </span>
+              </span>
+            </div>
           </div>
         </div>
       </div>
@@ -568,29 +647,44 @@ export default function AdminDashboard() {
         <div className="lg:col-span-2 bg-white rounded-xl shadow-sm border border-gray-100 p-6">
           <h2 className="text-lg font-semibold text-gray-900 mb-6">Recent Activity</h2>
           <div className="space-y-4">
-            {notifications.map(notification => (
-              <div key={notification.id} className="flex items-start gap-4 p-3 hover:bg-gray-50 rounded-lg">
+            {activities.map((activity) => (
+              <div key={activity.id} className="flex items-start gap-4 p-3 hover:bg-gray-50 rounded-lg">
                 <div className={`p-2 rounded-full ${
-                  notification.type === 'payment' ? 'bg-green-100 text-green-600' :
-                  notification.type === 'balance' ? 'bg-yellow-100 text-yellow-600' :
-                  'bg-blue-100 text-blue-600'
+                  activity.type === 'payment' ? 'bg-green-100 text-green-600' :
+                  activity.type === 'balance' ? 'bg-yellow-100 text-yellow-600' :
+                  activity.type === 'student' ? 'bg-blue-100 text-blue-600' :
+                  activity.type === 'notification' ? 'bg-purple-100 text-purple-600' :
+                  'bg-gray-100 text-gray-600'
                 }`}>
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    {notification.type === 'payment' ? (
+                  {activity.type === 'payment' ? (
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3-.895 3-2-1.343-2-3-2z" />
-                    ) : notification.type === 'balance' ? (
+                    </svg>
+                  ) : activity.type === 'balance' ? (
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                    ) : (
+                    </svg>
+                  ) : activity.type === 'student' ? (
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                    </svg>
+                  ) : (
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                    )}
-                  </svg>
+                    </svg>
+                  )}
                 </div>
                 <div className="flex-1">
-                  <p className="text-sm text-gray-900">{notification.message}</p>
-                  <span className="text-xs text-gray-500">{notification.time}</span>
+                  <p className="text-sm text-gray-900">{activity.description}</p>
+                  <span className="text-xs text-gray-500">
+                    {formatDistanceToNow(activity.createdAt.toDate(), { addSuffix: true })}
+                  </span>
                 </div>
               </div>
             ))}
+            {activities.length === 0 && (
+              <p className="text-sm text-gray-500 text-center py-4">No recent activity</p>
+            )}
           </div>
         </div>
 
@@ -619,7 +713,7 @@ export default function AdminDashboard() {
                     <td className="py-4 font-medium">₱{payment.amount.toLocaleString()}</td>
                     <td className="py-4">
                       <span className="px-3 py-1 rounded-full text-xs font-medium bg-green-50 text-green-700">
-                        Completed
+                        Completed 
                       </span>
                     </td>
                     <td className="py-4 text-gray-500">
@@ -648,6 +742,10 @@ export default function AdminDashboard() {
               <span className="text-gray-600">This Month</span>
               <span className="font-medium">₱{monthlyCollection.toLocaleString()}</span>
             </div>
+            <div className="flex justify-between items-center">
+              <span className="text-gray-600">This Year</span>
+              <span className="font-medium">₱{yearlyCollection.toLocaleString()}</span>
+            </div>
             <div className="pt-4 border-t">
               <div className="flex justify-between items-center">
                 <span className="font-medium text-gray-900">Total Collections</span>
@@ -657,45 +755,8 @@ export default function AdminDashboard() {
           </div>
         </div>
       </div>
-
-      {/* Payment Status Overview */}
-      <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6 mb-6">
-        <h2 className="text-lg font-semibold text-gray-900 mb-6">Payment Status Overview</h2>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <div className="flex items-center gap-4">
-            <div className="bg-green-100 p-4 rounded-lg">
-              <svg className="w-6 h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-            </div>
-            <div>
-              <p className="text-sm text-gray-500">Completed Payments</p>
-              <p className="text-xl font-bold text-gray-900">{stats.completedPayments}</p>
-            </div>
-          </div>
-          <div className="flex items-center gap-4">
-            <div className="bg-yellow-100 p-4 rounded-lg">
-              <svg className="w-6 h-6 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-            </div>
-            <div>
-              <p className="text-sm text-gray-500">Pending Payments</p>
-              <p className="text-xl font-bold text-gray-900">{stats.pendingPayments}</p>
-            </div>
-          </div>
-          <div className="flex items-center gap-4">
-            <div className="bg-blue-100 p-4 rounded-lg">
-              <svg className="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-              </svg>
-            </div>
-            <div>
-              <p className="text-sm text-gray-500">Success Rate</p>
-              <p className="text-xl font-bold text-gray-900">{Math.round(stats.collectionRate)}%</p>
-            </div>
-          </div>
-        </div>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div>{/* Your payment trends chart */}</div>
       </div>
     </div>
   );

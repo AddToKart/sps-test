@@ -1,6 +1,7 @@
 import { db } from '@/lib/firebase/config';
 import { collection, doc, updateDoc, addDoc, getDoc, Timestamp, setDoc, writeBatch } from 'firebase/firestore';
 import { Balance } from '@/types/student';
+import { ActivityService } from './ActivityService';
 
 export class PaymentService {
   static async processPayment(paymentData: {
@@ -9,6 +10,7 @@ export class PaymentService {
     amount: number;
     paymentMethod: string;
     studentEmail: string;
+    studentName: string;
   }) {
     try {
       console.log('Processing payment for balance:', paymentData.balanceId);
@@ -58,6 +60,21 @@ export class PaymentService {
       // 4. Verify the update
       const updatedBalance = await getDoc(balanceRef);
       console.log('Updated balance data:', updatedBalance.data());
+
+      // Log the activity
+      await ActivityService.logActivity({
+        type: 'payment',
+        action: 'payment_received',
+        description: `Payment received from ${paymentData.studentName}`,
+        userId: paymentData.studentId,
+        userType: 'student',
+        metadata: {
+          amount: paymentData.amount,
+          studentName: paymentData.studentName,
+          paymentMethod: paymentData.paymentMethod,
+          balanceType: balance.type
+        }
+      });
 
       // Return a properly structured payment result that matches what the UI expects
       return {
@@ -183,5 +200,36 @@ export class PaymentService {
     const timestamp = Date.now().toString().slice(-6);
     const random = Math.random().toString(36).substring(2, 5).toUpperCase();
     return `PAY-${timestamp}${random}`;
+  }
+
+  static async addBulkFees(feeData: {
+    feeType: string;
+    amount: number;
+    dueDate: Date;
+    description: string;
+    addedBy: string;
+  }) {
+    try {
+      // Your existing bulk fee addition logic...
+
+      // Log the activity
+      await ActivityService.logActivity({
+        type: 'balance',
+        action: 'bulk_fees_added',
+        description: `Added ${feeData.feeType} fees to ${studentsAffected} students`,
+        userId: feeData.addedBy,
+        userType: 'admin',
+        metadata: {
+          feeType: feeData.feeType,
+          amount: feeData.amount,
+          studentsAffected,
+          dueDate: feeData.dueDate
+        }
+      });
+
+    } catch (error) {
+      console.error('Error adding bulk fees:', error);
+      throw error;
+    }
   }
 } 

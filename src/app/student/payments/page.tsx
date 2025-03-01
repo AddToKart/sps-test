@@ -7,6 +7,8 @@ import { db } from '@/lib/firebase/config';
 import { collection, query, where, getDocs, orderBy } from 'firebase/firestore';
 import { PaymentReceipt } from '@/components/PaymentReceipt';
 import { toast } from 'react-hot-toast';
+import { pdf } from '@react-pdf/renderer';
+import ReceiptDocument from '@/components/student/ReceiptDocument';
 
 interface Balance {
   id: string;
@@ -117,6 +119,40 @@ export default function PaymentsPage() {
     }
     setSelectedBalance(balance);
     setShowReceipt(true);
+  };
+
+  const generatePDFReceipt = async (payment: Balance) => {
+    try {
+      console.log('Generating PDF receipt for payment:', payment);
+      
+      // Create the PDF document using the ReceiptDocument component
+      const blob = await pdf(
+        <ReceiptDocument
+          studentName={user?.displayName || ''}
+          studentEmail={user?.email || ''}
+          studentId={payment.studentId || ''}
+          balance={payment}
+          paymentMethod={payment.paymentMethod}
+          referenceNumber={payment.referenceNumber || `REF-${payment.id.substring(0, 8)}`}
+        />
+      ).toBlob();
+      
+      // Create a URL for the blob
+      const url = URL.createObjectURL(blob);
+      
+      // Create a link element and trigger a download
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `receipt-${payment.id}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      
+      toast.success('Receipt downloaded successfully');
+    } catch (error) {
+      console.error('Error generating PDF receipt:', error);
+      toast.error('Failed to generate receipt. Please try again.');
+    }
   };
 
   if (loading) {
@@ -302,26 +338,71 @@ export default function PaymentsPage() {
       {/* Receipt Modal */}
       {showReceipt && selectedBalance && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-xl max-w-4xl w-full max-h-[90vh] overflow-y-auto animate-scale-up">
-            <div className="p-6 border-b border-gray-200 flex justify-between items-center">
-              <h3 className="text-lg font-semibold">Payment Receipt</h3>
-              <button
+          <div className="bg-white rounded-lg p-6 max-w-md w-full">
+            <div className="flex justify-between items-center mb-6">
+              <h2 className="text-xl font-semibold">Payment Receipt</h2>
+              <button 
                 onClick={() => setShowReceipt(false)}
-                className="text-gray-500 hover:text-gray-700 transition-colors"
+                className="text-gray-500 hover:text-gray-700"
               >
                 <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                 </svg>
               </button>
             </div>
-            <div className="p-6">
-              <PaymentReceipt
-                studentName={user?.displayName || ''}
-                studentEmail={user?.email || ''}
-                balance={selectedBalance}
-                paymentMethod={selectedBalance.paymentMethod}
-                referenceNumber={selectedBalance.referenceNumber}
-              />
+            
+            <div className="text-center mb-6">
+              <h3 className="text-lg font-medium text-gray-900">Payment Receipt</h3>
+              <p className="text-gray-600">Thank you for your payment</p>
+            </div>
+            
+            <div className="border-t border-b border-gray-200 py-4 mb-4">
+              <div className="flex justify-between mb-2">
+                <span className="text-gray-600">Reference Number:</span>
+                <span className="font-medium">{selectedBalance.referenceNumber || `REF-${selectedBalance.id.substring(0, 8)}`}</span>
+              </div>
+              <div className="flex justify-between mb-2">
+                <span className="text-gray-600">Amount:</span>
+                <span className="font-medium">₱{selectedBalance.amount.toLocaleString()}</span>
+              </div>
+              <div className="flex justify-between mb-2">
+                <span className="text-gray-600">Payment Type:</span>
+                <span className="font-medium">{selectedBalance.type}</span>
+              </div>
+              <div className="flex justify-between mb-2">
+                <span className="text-gray-600">Payment Method:</span>
+                <span className="font-medium">{selectedBalance.paymentMethod}</span>
+              </div>
+              <div className="flex justify-between mb-2">
+                <span className="text-gray-600">Date:</span>
+                <span className="font-medium">
+                  {selectedBalance.paidAt?.toDate().toLocaleDateString('en-US', {
+                    month: 'long',
+                    day: 'numeric',
+                    year: 'numeric'
+                  })}
+                </span>
+              </div>
+            </div>
+            
+            <div className="text-center text-green-600 mb-4">
+              <p className="font-medium">Payment Successful</p>
+              <p className="text-sm text-gray-500 mt-1">A copy of this receipt has been sent to your email.</p>
+            </div>
+            
+            <div className="flex justify-between">
+              <button
+                onClick={() => setShowReceipt(false)}
+                className="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50"
+              >
+                Close
+              </button>
+              <button
+                onClick={() => generatePDFReceipt(selectedBalance)}
+                className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
+              >
+                Download PDF
+              </button>
             </div>
           </div>
         </div>
