@@ -1,8 +1,8 @@
 'use client';
 
-import React, { useState } from 'react';
+import { useState } from 'react';
+import { signInWithEmailAndPassword } from 'firebase/auth';
 import { auth } from '@/lib/firebase/config';
-import { signInWithEmailAndPassword, createUserWithEmailAndPassword } from 'firebase/auth';
 import { useRouter } from 'next/navigation';
 
 export default function Login() {
@@ -18,20 +18,14 @@ export default function Login() {
     setLoading(true);
 
     try {
-      console.log('Attempting login with:', email.trim());
       const userCredential = await signInWithEmailAndPassword(auth, email.trim(), password);
       const userEmail = userCredential.user.email?.toLowerCase();
-      
-      console.log('Login successful, user email:', userEmail);
 
       if (userEmail?.endsWith('@admin.com')) {
-        console.log('Redirecting to admin dashboard');
         router.push('/admin');
       } else if (userEmail?.endsWith('@icons.com')) {
-        console.log('Redirecting to student dashboard');
         router.push('/student/dashboard');
       } else {
-        console.log('Invalid email domain:', userEmail);
         throw new Error('Invalid user type');
       }
     } catch (error: any) {
@@ -39,50 +33,6 @@ export default function Login() {
       setError('Invalid email or password. Please try again.');
     } finally {
       setLoading(false);
-    }
-  };
-
-  const handleQuickLogin = async (type: 'admin' | 'student') => {
-    setError(null);
-    setLoading(true);
-
-    const credentials = {
-      admin: {
-        email: 'kurt@admin.com',
-        password: 'kurt123'
-      },
-      student: {
-        email: 'kategarciaborbe@icons.com',
-        password: 'kate123'
-      }
-    };
-
-    try {
-      const { email, password } = credentials[type];
-      const userCredential = await signInWithEmailAndPassword(auth, email, password);
-      const userEmail = userCredential.user.email?.toLowerCase();
-
-      if (userEmail?.endsWith('@admin.com')) {
-        router.push('/admin');
-      } else if (userEmail?.endsWith('@student.com') || userEmail?.endsWith('@icons.com')) {
-        router.push('/student/dashboard');
-      } else {
-        throw new Error('Invalid user type');
-      }
-    } catch (error: any) {
-      console.error('Quick login error:', error);
-      setError('Invalid email or password. Please try again.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const createAdminAccount = async () => {
-    try {
-      await createUserWithEmailAndPassword(auth, 'admin@admin.com', 'your-secure-password');
-      console.log('Admin account created');
-    } catch (error: any) {
-      console.error('Error creating admin:', error.message);
     }
   };
 
@@ -146,33 +96,6 @@ export default function Login() {
               {error}
             </div>
           )}
-
-          {/* Quick Login Buttons */}
-          <div className="mt-6 space-y-3">
-            <div className="relative">
-              <div className="absolute inset-0 flex items-center">
-                <div className="w-full border-t border-gray-200"></div>
-              </div>
-              <div className="relative flex justify-center text-sm">
-                <span className="px-2 bg-white text-gray-500">Quick access</span>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <button
-                onClick={() => handleQuickLogin('admin')}
-                className="flex items-center justify-center px-4 py-2 border border-transparent text-sm font-medium rounded-lg text-white bg-green-600 hover:bg-green-700 transition-colors"
-              >
-                Quick Admin Login
-              </button>
-              <button
-                onClick={() => handleQuickLogin('student')}
-                className="flex items-center justify-center px-4 py-2 border border-transparent text-sm font-medium rounded-lg text-white bg-blue-600 hover:bg-blue-700 transition-colors"
-              >
-                Quick Student Login
-              </button>
-            </div>
-          </div>
         </div>
 
         {/* Footer */}

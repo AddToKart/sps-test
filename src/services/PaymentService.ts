@@ -1,7 +1,8 @@
 import { db } from '@/lib/firebase/config';
-import { collection, doc, updateDoc, addDoc, getDoc, Timestamp, setDoc, writeBatch } from 'firebase/firestore';
+import { collection, doc, updateDoc, addDoc, getDoc, Timestamp, setDoc, writeBatch, query, where, getDocs } from 'firebase/firestore';
 import { Balance } from '@/types/student';
 import { ActivityService } from './ActivityService';
+import { ErrorHandlingService } from './ErrorHandlingService';
 
 export class PaymentService {
   static async processPayment(paymentData: {
@@ -12,6 +13,8 @@ export class PaymentService {
     studentEmail: string;
     studentName: string;
   }) {
+    const batch = writeBatch(db);
+    
     try {
       console.log('Processing payment for balance:', paymentData.balanceId);
 
@@ -27,9 +30,17 @@ export class PaymentService {
       const now = Timestamp.now();
       const referenceNumber = this.generateReferenceNumber(paymentData.studentId);
 
-      // 2. Create payment record
+      // 2. Update balance status
+      batch.update(balanceRef, {
+        status: 'paid',
+        paidAt: now,
+        paymentMethod: paymentData.paymentMethod,
+        referenceNumber: referenceNumber
+      });
+
+      // 3. Create payment record
       const paymentRef = doc(collection(db, 'payments'));
-      await setDoc(paymentRef, {
+      batch.set(paymentRef, {
         balanceId: paymentData.balanceId,
         studentId: paymentData.studentId,
         amount: paymentData.amount,
@@ -42,25 +53,9 @@ export class PaymentService {
         type: balance.type
       });
 
-      console.log('Payment record created:', paymentRef.id);
-
-      // 3. Update balance status - using setDoc to ensure all fields are updated
-      const balanceUpdate = {
-        ...balance,
-        status: 'paid',
-        paymentMethod: paymentData.paymentMethod,
-        paidAt: now,
-        paymentId: paymentRef.id,
-        updatedAt: now
-      };
-
-      await setDoc(balanceRef, balanceUpdate);
-      console.log('Balance updated:', paymentData.balanceId);
-
-      // 4. Verify the update
-      const updatedBalance = await getDoc(balanceRef);
-      console.log('Updated balance data:', updatedBalance.data());
-
+      // 4. Commit the batch
+      await batch.commit();
+      
       // Log the activity
       await ActivityService.logActivity({
         type: 'payment',
@@ -90,8 +85,8 @@ export class PaymentService {
         balanceType: balance.type // Adding this to match what the UI expects
       };
     } catch (error) {
-      console.error('Payment processing error:', error);
-      throw error;
+      ErrorHandlingService.handleError(error, 'Failed to process payment');
+      return { success: false, error };
     }
   }
 
@@ -230,6 +225,28 @@ export class PaymentService {
     } catch (error) {
       console.error('Error adding bulk fees:', error);
       throw error;
+    }
+  }
+
+  static async getBulkPaymentStats(startDate: Date, endDate: Date) {
+    try {
+      const q = query(
+        collection(db, 'payments'),
+        where('createdAt', '>=', Timestamp.fromDate(startDate)),
+        where('createdAt', '<=', Timestamp.fromDate(endDate))
+      );
+
+      const snapshot = await getDocs(q);
+      const payments = snapshot.docs.map(doc => doc.data());
+
+      return {
+        totalAmount: payments.reduce((sum, payment) => sum + (payment.amount || 0), 0),
+        totalCount: payments.length,
+        averageAmount: payments.length ? payments.reduce((sum, payment) => sum + (payment.amount || 0), 0) / payments.length : 0
+      };
+    } catch (error) {
+      ErrorHandlingService.handleError(error, 'Failed to get payment statistics');
+      return null;
     }
   }
 } 
