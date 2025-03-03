@@ -4,6 +4,7 @@ import { Fragment, useState } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
 import { db } from '@/lib/firebase/config';
 import { collection, addDoc, getDocs } from 'firebase/firestore';
+import { toast } from 'react-hot-toast';
 
 interface BulkFeeModalProps {
   isOpen: boolean;
@@ -14,15 +15,54 @@ export default function BulkFeeModal({ isOpen, onClose }: BulkFeeModalProps) {
   const [formData, setFormData] = useState({
     feeType: 'tuition',
     amount: '',
-    dueDate: '',
+    dueDate: new Date().toISOString().split('T')[0],
     description: '',
     yearLevel: 'all',
     program: 'all'
   });
 
+  const [dateError, setDateError] = useState(false);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const minDate = today.toISOString().split('T')[0];
+
+  const validateDate = (dateString: string): boolean => {
+    const selectedDate = new Date(dateString);
+    selectedDate.setHours(0, 0, 0, 0);
+    return selectedDate >= today;
+  };
+
+  const handleDateChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const newDate = e.target.value;
+    const isValid = validateDate(newDate);
+    
+    if (!isValid) {
+      setDateError(true);
+      toast.error('Due date cannot be in the past');
+      setFormData(prev => ({ ...prev, dueDate: minDate }));
+      return;
+    }
+    
+    setDateError(false);
+    setFormData(prev => ({ ...prev, dueDate: newDate }));
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    // Validate date one more time before submission
+    if (!validateDate(formData.dueDate)) {
+      setDateError(true);
+      toast.error('Due date cannot be in the past');
+      return;
+    }
+
     try {
+      if (dateError) {
+        toast.error('Please select a valid due date');
+        return;
+      }
+
       // Get all students based on filters
       const studentsRef = collection(db, 'students');
       const studentsSnapshot = await getDocs(studentsRef);
@@ -47,17 +87,19 @@ export default function BulkFeeModal({ isOpen, onClose }: BulkFeeModalProps) {
       });
 
       await Promise.all(promises);
+      toast.success('Bulk fees added successfully');
       onClose();
       setFormData({
         feeType: 'tuition',
         amount: '',
-        dueDate: '',
+        dueDate: new Date().toISOString().split('T')[0],
         description: '',
         yearLevel: 'all',
         program: 'all'
       });
     } catch (error) {
       console.error('Error adding bulk fees:', error);
+      toast.error('Failed to add bulk fees');
     }
   };
 
@@ -99,10 +141,20 @@ export default function BulkFeeModal({ isOpen, onClose }: BulkFeeModalProps) {
                 <input
                   type="date"
                   value={formData.dueDate}
-                  onChange={(e) => setFormData({ ...formData, dueDate: e.target.value })}
-                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-[#4FB3E8] focus:ring-[#4FB3E8]"
+                  min={minDate}
+                  onChange={handleDateChange}
+                  onKeyDown={(e) => e.preventDefault()} // Prevent manual input
+                  className={`mt-1 block w-full rounded-md shadow-sm focus:ring-[#4FB3E8] 
+                    ${dateError 
+                      ? 'border-red-500 focus:border-red-500' 
+                      : 'border-gray-300 focus:border-[#4FB3E8]'}`}
                   required
                 />
+                {dateError && (
+                  <p className="mt-1 text-sm text-red-600">
+                    Due date must be today or a future date
+                  </p>
+                )}
               </div>
 
               <div>
