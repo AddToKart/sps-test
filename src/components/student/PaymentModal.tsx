@@ -149,8 +149,8 @@ export default function PaymentModal({
         {loading ? (
           <div className="text-center py-8">
             <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-[#4FB3E8] mx-auto mb-4"></div>
-            <h3 className="text-lg font-semibold mb-2">Processing Payment...</h3>
-            <p className="text-gray-500">Please wait while we process your payment...</p>
+            <h3 className="text-lg font-semibold mb-2">Processing Payment{selectedBalance?.isMultiplePayment ? 's' : ''}...</h3>
+            <p className="text-gray-500">Please wait while we process your payment{selectedBalance?.isMultiplePayment ? 's' : ''}...</p>
           </div>
         ) : (
           <form onSubmit={handleSubmit}>

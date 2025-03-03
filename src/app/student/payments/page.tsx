@@ -4,11 +4,12 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import { db } from '@/lib/firebase/config';
-import { collection, query, where, getDocs, orderBy } from 'firebase/firestore';
+import { collection, query, where, getDocs, orderBy, deleteDoc, doc } from 'firebase/firestore';
 import { PaymentReceipt } from '@/components/PaymentReceipt';
 import { toast } from 'react-hot-toast';
 import { pdf } from '@react-pdf/renderer';
 import ReceiptDocument from '@/components/student/ReceiptDocument';
+import ReceiptModal from '@/components/student/ReceiptModal';
 
 interface Balance {
   id: string;
@@ -37,6 +38,9 @@ export default function PaymentsPage() {
     averagePayment: 0,
     preferredMethod: 'N/A'
   });
+  const [showReceiptModal, setShowReceiptModal] = useState(false);
+  const [selectedPayment, setSelectedPayment] = useState<Balance | null>(null);
+  const [studentInfo, setStudentInfo] = useState<any>(null);
 
   useEffect(() => {
     if (!user?.email?.endsWith('@icons.com')) {
@@ -116,36 +120,68 @@ export default function PaymentsPage() {
     fetchPayments();
   }, [user, router]);
 
+  useEffect(() => {
+    if (user) {
+      fetchStudentInfo();
+    }
+  }, [user]);
+
+  const fetchStudentInfo = async () => {
+    if (!user?.uid) return;
+    
+    try {
+      const studentsRef = collection(db, 'students');
+      const q = query(studentsRef, where('uid', '==', user.uid));
+      const snapshot = await getDocs(q);
+      
+      if (!snapshot.empty) {
+        const studentData = {
+          id: snapshot.docs[0].id,
+          ...snapshot.docs[0].data()
+        };
+        setStudentInfo(studentData);
+      }
+    } catch (error) {
+      console.error('Error fetching student info:', error);
+    }
+  };
+
   const filteredBalances = balances.filter(balance => {
     if (activeTab === 'paid') return balance.status === 'paid';
     if (activeTab === 'pending') return balance.status === 'pending';
     return true;
   });
 
-  const handleViewReceipt = (balance: Balance) => {
-    if (balance.status !== 'paid') {
-      toast.error('Receipt is only available for paid balances');
-      return;
-    }
-    setSelectedBalance(balance);
-    setShowReceipt(true);
+  const handleViewReceipt = (payment: any) => {
+    const enrichedPayment = {
+      ...payment,
+      studentInfo: {
+        studentId: studentInfo?.studentId || '',
+        fullName: studentInfo?.fullName || '',
+        email: studentInfo?.email || user?.email || '',
+        grade: studentInfo?.grade || '',
+        strand: studentInfo?.strand || '',
+        section: studentInfo?.section || ''
+      }
+    };
+    setSelectedPayment(enrichedPayment);
+    setShowReceiptModal(true);
   };
 
   const generatePDFReceipt = async (payment: Balance) => {
     try {
       console.log('Generating PDF receipt for payment:', payment);
       
-      // Create the PDF document using the ReceiptDocument component
       const blob = await pdf(
         <ReceiptDocument
-          studentName={user?.displayName || ''}
-          studentEmail={user?.email || ''}
-          studentId={payment.studentId || ''}
+          studentName={studentInfo?.fullName || ''}
+          studentEmail={studentInfo?.email || user?.email || ''}
+          studentId={studentInfo?.studentId || ''}
           balance={payment}
           paymentMethod={payment.paymentMethod}
           referenceNumber={payment.referenceNumber || `REF-${payment.id.substring(0, 8)}`}
           isMultiplePayment={payment.isMultiplePayment}
-          balances={payment.balances || []}
+          balanceDetails={payment.balanceDetails || []}
         />
       ).toBlob();
       
@@ -165,6 +201,39 @@ export default function PaymentsPage() {
       console.error('Error generating PDF receipt:', error);
       toast.error('Failed to generate receipt. Please try again.');
     }
+  };
+
+  const handleDeletePayment = async (paymentId: string) => {
+    try {
+      const confirmed = window.confirm(
+        'Are you sure you want to delete this payment record? This action cannot be undone.'
+      );
+
+      if (!confirmed) return;
+
+      // Delete the payment document
+      await deleteDoc(doc(db, 'payments', paymentId));
+
+      // Refresh the payments list
+      fetchPayments();
+
+      toast.success('Payment record deleted successfully');
+    } catch (error) {
+      console.error('Error deleting payment:', error);
+      toast.error('Failed to delete payment record');
+    }
+  };
+
+  const formatPaymentMethod = (method: string) => {
+    const methods: { [key: string]: string } = {
+      'gcash': 'GCash',
+      'maya': 'Maya',
+      'bpi': 'BPI Online',
+      'bdo': 'BDO Online',
+      'unionbank': 'UnionBank',
+      'grabpay': 'GrabPay'
+    };
+    return methods[method] || method;
   };
 
   if (loading) {
@@ -271,10 +340,11 @@ export default function PaymentsPage() {
             <thead>
               <tr className="bg-gray-50">
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Description</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Type</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Amount</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Payment Method</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Reference Number</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Type</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Action</th>
               </tr>
@@ -293,17 +363,20 @@ export default function PaymentsPage() {
                         year: 'numeric'
                       })}
                     </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                      {balance.isMultiplePayment ? balance.balances?.map(b => b.type).join(', ') : balance.type}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                      {balance.isMultiplePayment ? 'Group Payment' : 'Single Payment'}
+                    </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
                       ₱{balance.amount?.toLocaleString()}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 capitalize">
-                      {balance.paymentMethod || '-'}
+                      {formatPaymentMethod(balance.paymentMethod)}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                       {balance.referenceNumber || 'N/A'}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                      {balance.type}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <span className={`px-2 py-1 text-xs font-medium rounded-full ${
@@ -315,18 +388,22 @@ export default function PaymentsPage() {
                       </span>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm">
-                      {balance.status === 'paid' && (
+                      <div className="flex space-x-2">
                         <button
                           onClick={() => handleViewReceipt(balance)}
-                          className="text-blue-600 hover:text-blue-900 font-medium flex items-center gap-1"
+                          className="text-blue-600 hover:text-blue-800"
                         >
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                          </svg>
                           View Receipt
                         </button>
-                      )}
+                        {balance.status === 'paid' && (
+                          <button
+                            onClick={() => generatePDFReceipt(balance)}
+                            className="text-blue-600 hover:text-blue-800"
+                          >
+                            Download PDF
+                          </button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))
@@ -348,112 +425,11 @@ export default function PaymentsPage() {
       </div>
 
       {/* Receipt Modal */}
-      {showReceipt && selectedBalance && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-lg p-6 max-w-md w-full">
-            <div className="flex justify-between items-center mb-6">
-              <h2 className="text-xl font-semibold">Payment Receipt</h2>
-              <button 
-                onClick={() => setShowReceipt(false)}
-                className="text-gray-500 hover:text-gray-700"
-              >
-                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-            
-            <div className="text-center mb-6">
-              <h3 className="text-lg font-medium text-gray-900">Payment Receipt</h3>
-              <p className="text-gray-600">Thank you for your payment</p>
-            </div>
-            
-            <div className="border-t border-b border-gray-200 py-4 mb-4">
-              <div className="flex justify-between mb-2">
-                <span className="text-gray-600">Reference Number:</span>
-                <span className="font-medium">{selectedBalance.referenceNumber || `REF-${selectedBalance.id.substring(0, 8)}`}</span>
-              </div>
-              
-              {selectedBalance.isMultiplePayment ? (
-                <>
-                  <div className="flex justify-between mb-2">
-                    <span className="text-gray-600">Payment Type:</span>
-                    <span className="font-medium">Group Payment</span>
-                  </div>
-                  <div className="flex justify-between mb-2">
-                    <span className="text-gray-600">Total Amount:</span>
-                    <span className="font-medium">₱{selectedBalance.amount.toLocaleString()}</span>
-                  </div>
-                </>
-              ) : (
-                <>
-                  <div className="flex justify-between mb-2">
-                    <span className="text-gray-600">Payment Type:</span>
-                    <span className="font-medium">{selectedBalance.type}</span>
-                  </div>
-                  <div className="flex justify-between mb-2">
-                    <span className="text-gray-600">Amount:</span>
-                    <span className="font-medium">₱{selectedBalance.amount.toLocaleString()}</span>
-                  </div>
-                </>
-              )}
-              
-              <div className="flex justify-between mb-2">
-                <span className="text-gray-600">Payment Method:</span>
-                <span className="font-medium">{selectedBalance.paymentMethod}</span>
-              </div>
-              <div className="flex justify-between mb-2">
-                <span className="text-gray-600">Date:</span>
-                <span className="font-medium">
-                  {selectedBalance.paidAt?.toDate().toLocaleDateString('en-US', {
-                    month: 'long',
-                    day: 'numeric',
-                    year: 'numeric'
-                  })}
-                </span>
-              </div>
-            </div>
-            
-            {/* Payment Breakdown for Group Payments */}
-            {selectedBalance.isMultiplePayment && selectedBalance.balances && selectedBalance.balances.length > 0 && (
-              <div className="mb-4">
-                <h4 className="font-medium text-gray-900 mb-2">Payment Breakdown</h4>
-                <div className="bg-gray-50 rounded-md p-3">
-                  {selectedBalance.balances.map((item, index) => (
-                    <div key={index} className="flex justify-between py-1 border-b border-gray-200 last:border-0">
-                      <span className="text-sm">{item.type || 'Payment'}</span>
-                      <span className="text-sm font-medium">₱{(item.amount || 0).toLocaleString()}</span>
-                    </div>
-                  ))}
-                  <div className="flex justify-between pt-2 mt-1 border-t border-gray-300">
-                    <span className="font-medium">Total</span>
-                    <span className="font-medium">₱{(selectedBalance.amount || 0).toLocaleString()}</span>
-                  </div>
-                </div>
-              </div>
-            )}
-            
-            <div className="text-center text-green-600 mb-4">
-              <p className="font-medium">Payment Successful</p>
-              <p className="text-sm text-gray-500 mt-1">A copy of this receipt has been sent to your email.</p>
-            </div>
-            
-            <div className="flex justify-between">
-              <button
-                onClick={() => setShowReceipt(false)}
-                className="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50"
-              >
-                Close
-              </button>
-              <button
-                onClick={() => generatePDFReceipt(selectedBalance)}
-                className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
-              >
-                Download PDF
-              </button>
-            </div>
-          </div>
-        </div>
+      {showReceiptModal && selectedPayment && (
+        <ReceiptModal
+          lastPayment={selectedPayment}
+          onClose={() => setShowReceiptModal(false)}
+        />
       )}
     </div>
   );

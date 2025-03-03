@@ -27,6 +27,7 @@ import { Notification } from '@/types/notification';
 import { BellIcon } from '@heroicons/react/24/outline';
 import { ActivityService } from '@/services/ActivityService';
 import ReceiptDocument from '@/components/student/ReceiptDocument';
+import ReceiptModal from '@/components/student/ReceiptModal';
 
 ChartJS.register(
   CategoryScale,
@@ -373,97 +374,77 @@ export default function StudentDashboard() {
     setIsPaymentModalOpen(true);
   };
 
-  // Update the processMultiplePayments function to properly group payments
-  const processMultiplePayments = async (paymentMethod, referenceNumber) => {
+  // Update the processMultiplePayments function
+  const processMultiplePayments = async (paymentMethod: string, referenceNumber: string) => {
     try {
       setProcessingPayment(true);
+      const loadingToast = toast.loading('Processing multiple payments...'); // Add loading toast
       
-      // Calculate total amount
-      const totalAmount = selectedBalances.reduce((sum, balance) => sum + balance.amount, 0);
+      // Calculate total amount and ensure it's a number
+      const totalAmount = selectedBalances.reduce((sum, balance) => sum + (Number(balance.amount) || 0), 0);
       
-      // Create a single payment record for all balances
-      const paymentRef = await addDoc(collection(db, 'payments'), {
-        studentId: user?.uid,
+      // Create payment data object with all required fields
+      const paymentData = {
+        studentId: user?.uid || '',
+        studentName: studentInfo?.fullName || '',
+        studentEmail: user?.email || '',
+        studentInfo: {
+          studentId: studentInfo?.studentId || '',
+          fullName: studentInfo?.fullName || '',
+          grade: studentInfo?.grade || '',
+          strand: studentInfo?.strand || '',
+          section: studentInfo?.section || ''
+        },
         amount: totalAmount,
-        paymentMethod: paymentMethod,
-        referenceNumber: referenceNumber,
+        paymentMethod: paymentMethod || '',
+        referenceNumber: referenceNumber || '',
         status: 'completed',
-        type: 'Multiple Payments',
+        type: 'Group Payment',
         createdAt: Timestamp.now(),
         paidAt: Timestamp.now(),
         isMultiplePayment: true,
-        balanceIds: selectedBalances.map(b => b.id),
-        // Store the details of each balance for the receipt
-        balances: selectedBalances.map(b => ({
-          id: b.id,
-          type: b.type,
-          amount: b.amount,
-          dueDate: b.dueDate
-        }))
-      });
-      
-      // Update all selected balances to reference this payment
+        balanceDetails: selectedBalances.map(b => ({
+          id: b.id || '',
+          type: b.type || '',
+          amount: Number(b.amount) || 0
+        })).filter(b => b.amount > 0)
+      };
+
+      // 1. Create payment record with validated data
+      const paymentRef = await addDoc(collection(db, 'payments'), paymentData);
+
+      // 2. Update the status of each balance to 'paid'
       const updatePromises = selectedBalances.map(balance => 
         updateDoc(doc(db, 'balances', balance.id), {
-          status: 'completed',
+          status: 'paid',
           paidAt: Timestamp.now(),
+          paymentId: paymentRef.id,
           paymentMethod: paymentMethod,
-          referenceNumber: referenceNumber,
-          groupPaymentId: paymentRef.id // Add reference to the group payment
+          referenceNumber: referenceNumber
         })
       );
       
       await Promise.all(updatePromises);
-      
-      // Log the activity
-      await ActivityService.logActivityWithSafeMetadata({
-        type: 'payment',
-        action: 'multiple_payments_completed',
-        description: `Group payment of ₱${totalAmount.toLocaleString()} completed`,
-        userId: user?.uid || '',
-        userType: 'student',
-        metadata: {
-          paymentId: paymentRef.id,
-          balanceIds: selectedBalances.map(b => b.id),
-          studentId: user?.uid || '',
-          studentEmail: user?.email || '',
-          amount: totalAmount,
-          paymentMethod: paymentMethod,
-          referenceNumber: referenceNumber
-        }
-      });
-      
-      // Set the last payment for receipt
+
+      // 3. Set up receipt data
       setLastPayment({
-        id: paymentRef.id,
-        amount: totalAmount,
-        type: 'Group Payment',
-        paymentMethod: paymentMethod,
-        referenceNumber: referenceNumber,
-        createdAt: Timestamp.now(),
-        paidAt: Timestamp.now(),
-        status: 'completed',
-        isMultiplePayment: true,
-        balances: selectedBalances.map(b => ({
-          id: b.id,
-          type: b.type,
-          amount: b.amount,
-          dueDate: b.dueDate
-        }))
+        ...paymentData,
+        id: paymentRef.id
       });
-      
-      // Show receipt
+
+      // 4. Show receipt and clean up
+      toast.dismiss(loadingToast); // Dismiss loading toast
+      toast.success('Multiple payments processed successfully!');
       setShowReceipt(true);
       setIsPaymentModalOpen(false);
-      
-      toast.success('Multiple payments processed successfully!');
-      fetchBalances(); // Refresh balances
+      fetchBalances();
       
     } catch (error) {
-      console.error('Error processing multiple payments:', error);
+      console.error('Error processing payments:', error);
       toast.error('Failed to process payments. Please try again.');
     } finally {
       setProcessingPayment(false);
+      setSelectedBalances([]);
     }
   };
 
@@ -856,7 +837,7 @@ export default function StudentDashboard() {
           paymentMethod={payment.paymentMethod}
           referenceNumber={payment.referenceNumber || `REF-${payment.id.substring(0, 8)}`}
           isMultiplePayment={payment.isMultiplePayment}
-          balances={payment.balances || []}
+          balanceDetails={payment.balanceDetails || []}
         />
       ).toBlob();
       
@@ -876,111 +857,6 @@ export default function StudentDashboard() {
       console.error('Error generating PDF receipt:', error);
       toast.error('Failed to generate receipt. Please try again.');
     }
-  };
-
-  // Add the ReceiptModal component to the dashboard page
-  const ReceiptModal = () => {
-    if (!lastPayment) return null;
-    
-    return (
-      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-        <div className="bg-white rounded-lg p-6 max-w-md w-full">
-          <div className="flex justify-between items-center mb-6">
-            <h2 className="text-xl font-semibold">Payment Receipt</h2>
-            <button 
-              onClick={() => setShowReceipt(false)}
-              className="text-gray-500 hover:text-gray-700"
-            >
-              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
-          </div>
-          
-          <div className="text-center mb-6">
-            <h3 className="text-lg font-medium text-gray-900">Payment Receipt</h3>
-            <p className="text-gray-600">Thank you for your payment</p>
-          </div>
-          
-          <div className="border-t border-b border-gray-200 py-4 mb-4">
-            <div className="flex justify-between mb-2">
-              <span className="text-gray-600">Student ID:</span>
-              <span className="font-medium">{studentInfo?.studentId}</span>
-            </div>
-            <div className="flex justify-between mb-2">
-              <span className="text-gray-600">Reference Number:</span>
-              <span className="font-medium">{lastPayment.referenceNumber || `REF-${lastPayment.id.substring(0, 8)}`}</span>
-            </div>
-            {!lastPayment.isMultiplePayment ? (
-              <>
-                <div className="flex justify-between mb-2">
-                  <span className="text-gray-600">Payment Type:</span>
-                  <span className="font-medium">{lastPayment.type}</span>
-                </div>
-                <div className="flex justify-between mb-2">
-                  <span className="text-gray-600">Amount:</span>
-                  <span className="font-medium">₱{lastPayment.amount.toLocaleString()}</span>
-                </div>
-              </>
-            ) : (
-              <div className="flex justify-between mb-2">
-                <span className="text-gray-600">Total Amount:</span>
-                <span className="font-medium">₱{lastPayment.amount.toLocaleString()}</span>
-              </div>
-            )}
-            <div className="flex justify-between mb-2">
-              <span className="text-gray-600">Payment Method:</span>
-              <span className="font-medium">{lastPayment.paymentMethod}</span>
-            </div>
-            <div className="flex justify-between mb-2">
-              <span className="text-gray-600">Date:</span>
-              <span className="font-medium">
-                {formatDate(lastPayment.paidAt || lastPayment.createdAt)}
-              </span>
-            </div>
-          </div>
-          
-          {/* Multiple Payments Breakdown */}
-          {lastPayment.isMultiplePayment && lastPayment.balances && lastPayment.balances.length > 0 && (
-            <div className="mb-4">
-              <h4 className="font-medium text-gray-900 mb-2">Payment Breakdown</h4>
-              <div className="bg-gray-50 rounded-md p-3">
-                {lastPayment.balances.map((item, index) => (
-                  <div key={index} className="flex justify-between py-1 border-b border-gray-200 last:border-0">
-                    <span className="text-sm">{item.type}</span>
-                    <span className="text-sm font-medium">₱{item.amount.toLocaleString()}</span>
-                  </div>
-                ))}
-                <div className="flex justify-between pt-2 mt-1 border-t border-gray-300">
-                  <span className="font-medium">Total</span>
-                  <span className="font-medium">₱{lastPayment.amount.toLocaleString()}</span>
-                </div>
-              </div>
-            </div>
-          )}
-          
-          <div className="text-center text-green-600 mb-4">
-            <p className="font-medium">Payment Successful</p>
-            <p className="text-sm text-gray-500 mt-1">A copy of this receipt has been sent to your email.</p>
-          </div>
-          
-          <div className="flex justify-between">
-            <button
-              onClick={() => setShowReceipt(false)}
-              className="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50"
-            >
-              Close
-            </button>
-            <button
-              onClick={() => generatePDFReceipt(lastPayment)}
-              className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
-            >
-              Download PDF
-            </button>
-          </div>
-        </div>
-      </div>
-    );
   };
 
   // Update the fetchPaymentHistory function to handle grouped payments
@@ -1550,7 +1426,12 @@ export default function StudentDashboard() {
           processMultiplePayments={processMultiplePayments}
         />
       )}
-      {showReceipt && lastPayment && <ReceiptModal />}
+      {showReceipt && lastPayment && (
+        <ReceiptModal 
+          lastPayment={lastPayment} 
+          onClose={() => setShowReceipt(false)} 
+        />
+      )}
     </div>
   );
 } 
